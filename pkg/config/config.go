@@ -7,10 +7,15 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
+const (
+	StorageProviderMemory = "memory"
+)
+
 // AppConfig holds all runtime configuration for the service.
 type AppConfig struct {
-	Server ServerConfig `yaml:"server"`
-	LLM    LLMConfig    `yaml:"llm"`
+	Server  ServerConfig  `yaml:"server"`
+	Storage StorageConfig `yaml:"storage"`
+	LLM     LLMConfig     `yaml:"llm"`
 }
 
 // ServerConfig holds HTTP server related runtime options.
@@ -19,6 +24,11 @@ type ServerConfig struct {
 	Port                int    `yaml:"port"`
 	ReadTimeoutSeconds  int    `yaml:"read_timeout_seconds"`
 	WriteTimeoutSeconds int    `yaml:"write_timeout_seconds"`
+}
+
+// StorageConfig holds repository provider wiring options.
+type StorageConfig struct {
+	Provider string `yaml:"provider"`
 }
 
 // LLMConfig holds LLM provider wiring options.
@@ -53,6 +63,9 @@ func (c AppConfig) Validate() error {
 	if err := c.Server.Validate(); err != nil {
 		return fmt.Errorf("invalid server config: %w", err)
 	}
+	if err := c.Storage.Validate(); err != nil {
+		return fmt.Errorf("invalid storage config: %w", err)
+	}
 	if err := c.LLM.Validate(); err != nil {
 		return fmt.Errorf("invalid llm config: %w", err)
 	}
@@ -79,6 +92,17 @@ func (c ServerConfig) Validate() error {
 // Address returns server listen address.
 func (c ServerConfig) Address() string {
 	return fmt.Sprintf("%s:%d", c.Host, c.Port)
+}
+
+// Validate validates storage configuration.
+func (c StorageConfig) Validate() error {
+	if c.Provider == "" {
+		return fmt.Errorf("provider must not be empty")
+	}
+	if c.Provider != StorageProviderMemory {
+		return fmt.Errorf("provider must be %q", StorageProviderMemory)
+	}
+	return nil
 }
 
 // Validate validates LLM configuration.

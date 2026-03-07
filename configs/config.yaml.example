@@ -4,6 +4,9 @@ server:
   read_timeout_seconds: 15
   write_timeout_seconds: 15
 
+storage:
+  provider: "memory"
+
 llm:
   provider: "placeholder"
   model: "placeholder-model"

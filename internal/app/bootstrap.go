@@ -6,6 +6,7 @@ import (
 
 	httpinfra "novelforge/backend/internal/infra/http"
 	"novelforge/backend/internal/infra/llm"
+	"novelforge/backend/internal/infra/storage"
 	"novelforge/backend/pkg/config"
 
 	"github.com/cloudwego/hertz/pkg/app/server"
@@ -13,9 +14,10 @@ import (
 
 // Bootstrap wires runtime dependencies for the backend service.
 type Bootstrap struct {
-	Config    *config.AppConfig
-	HTTP      *server.Hertz
-	LLMClient llm.Client
+	Config       *config.AppConfig
+	HTTP         *server.Hertz
+	LLMClient    llm.Client
+	Repositories *storage.Repositories
 }
 
 // LoadBootstrap initializes runtime config and infrastructure.
@@ -23,6 +25,11 @@ func LoadBootstrap(configPath string) (*Bootstrap, error) {
 	cfg, err := config.Load(configPath)
 	if err != nil {
 		return nil, fmt.Errorf("load config: %w", err)
+	}
+
+	repositories, err := storage.NewRepositories(cfg.Storage)
+	if err != nil {
+		return nil, fmt.Errorf("init repositories: %w", err)
 	}
 
 	if _, exists := os.LookupEnv(cfg.LLM.APIKeyEnv); !exists {
@@ -37,8 +44,9 @@ func LoadBootstrap(configPath string) (*Bootstrap, error) {
 	httpServer := httpinfra.NewServer(cfg.Server)
 
 	return &Bootstrap{
-		Config:    cfg,
-		HTTP:      httpServer,
-		LLMClient: llmClient,
+		Config:       cfg,
+		HTTP:         httpServer,
+		LLMClient:    llmClient,
+		Repositories: repositories,
 	}, nil
 }
