@@ -1,8 +1,8 @@
 package memory
 
-import "errors"
+import "novelforge/backend/internal/infra/storage/shared"
 
 var (
-	ErrNotFound      = errors.New("memory storage: not found")
-	ErrAlreadyExists = errors.New("memory storage: already exists")
+	ErrNotFound      = shared.ErrNotFound
+	ErrAlreadyExists = shared.ErrAlreadyExists
 )

@@ -1,10 +1,10 @@
 package storage
 
-import "errors"
+import "novelforge/backend/internal/infra/storage/shared"
 
 var (
 	// ErrNotFound 表示请求的实体不存在。
-	ErrNotFound = errors.New("storage: not found")
+	ErrNotFound = shared.ErrNotFound
 	// ErrAlreadyExists 表示实体的键(key)已存在。
-	ErrAlreadyExists = errors.New("storage: already exists")
+	ErrAlreadyExists = shared.ErrAlreadyExists
 )

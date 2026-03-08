@@ -8,16 +8,18 @@ import (
 )
 
 func main() {
-	// 解析命令行参数：`-config` 指定配置文件路径，默认 `configs/config.yam
 	configPath := flag.String("config", "configs/config.yaml", "path to runtime config")
 	flag.Parse()
 
-	// 加载配置
 	bootstrap, err := app.LoadBootstrap(*configPath)
 	if err != nil {
 		log.Fatalf("bootstrap service: %v", err)
 	}
+	defer func() {
+		if closeErr := bootstrap.Close(); closeErr != nil {
+			log.Printf("close bootstrap resources: %v", closeErr)
+		}
+	}()
 
-	// 启动 Hertz HTTP 服务
 	bootstrap.HTTP.Spin()
 }

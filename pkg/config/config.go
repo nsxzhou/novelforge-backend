@@ -8,7 +8,8 @@ import (
 )
 
 const (
-	StorageProviderMemory = "memory"
+	StorageProviderMemory   = "memory"
+	StorageProviderPostgres = "postgres"
 )
 
 // AppConfig holds all runtime configuration for the service.
@@ -28,7 +29,16 @@ type ServerConfig struct {
 
 // StorageConfig holds repository provider wiring options.
 type StorageConfig struct {
-	Provider string `yaml:"provider"`
+	Provider string         `yaml:"provider"`
+	Postgres PostgresConfig `yaml:"postgres"`
+}
+
+// PostgresConfig holds PostgreSQL runtime options.
+type PostgresConfig struct {
+	URLEnv                 string `yaml:"url_env"`
+	MaxOpenConns           int    `yaml:"max_open_conns"`
+	MaxIdleConns           int    `yaml:"max_idle_conns"`
+	ConnMaxLifetimeSeconds int    `yaml:"conn_max_lifetime_seconds"`
 }
 
 // LLMConfig holds LLM provider wiring options.
@@ -99,8 +109,36 @@ func (c StorageConfig) Validate() error {
 	if c.Provider == "" {
 		return fmt.Errorf("provider must not be empty")
 	}
-	if c.Provider != StorageProviderMemory {
-		return fmt.Errorf("provider must be %q", StorageProviderMemory)
+
+	switch c.Provider {
+	case StorageProviderMemory:
+		return nil
+	case StorageProviderPostgres:
+		if err := c.Postgres.Validate(); err != nil {
+			return fmt.Errorf("invalid postgres config: %w", err)
+		}
+		return nil
+	default:
+		return fmt.Errorf("provider must be %q or %q", StorageProviderMemory, StorageProviderPostgres)
+	}
+}
+
+// Validate validates PostgreSQL configuration.
+func (c PostgresConfig) Validate() error {
+	if c.URLEnv == "" {
+		return fmt.Errorf("url_env must not be empty")
+	}
+	if c.MaxOpenConns < 0 {
+		return fmt.Errorf("max_open_conns must be greater than or equal to 0")
+	}
+	if c.MaxIdleConns < 0 {
+		return fmt.Errorf("max_idle_conns must be greater than or equal to 0")
+	}
+	if c.ConnMaxLifetimeSeconds < 0 {
+		return fmt.Errorf("conn_max_lifetime_seconds must be greater than or equal to 0")
+	}
+	if c.MaxOpenConns > 0 && c.MaxIdleConns > c.MaxOpenConns {
+		return fmt.Errorf("max_idle_conns must be less than or equal to max_open_conns")
 	}
 	return nil
 }

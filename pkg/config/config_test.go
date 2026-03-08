@@ -30,9 +30,13 @@ func TestStorageConfigValidate(t *testing.T) {
 		cfg     StorageConfig
 		wantErr string
 	}{
-		{name: "valid", cfg: StorageConfig{Provider: StorageProviderMemory}},
+		{name: "valid memory", cfg: StorageConfig{Provider: StorageProviderMemory}},
+		{name: "valid postgres", cfg: StorageConfig{Provider: StorageProviderPostgres, Postgres: PostgresConfig{URLEnv: "NOVELFORGE_DATABASE_URL", MaxOpenConns: 10, MaxIdleConns: 5, ConnMaxLifetimeSeconds: 300}}},
 		{name: "empty provider", cfg: StorageConfig{}, wantErr: "provider must not be empty"},
-		{name: "unsupported provider", cfg: StorageConfig{Provider: "sqlite"}, wantErr: "provider must be \"memory\""},
+		{name: "unsupported provider", cfg: StorageConfig{Provider: "sqlite"}, wantErr: "provider must be \"memory\" or \"postgres\""},
+		{name: "postgres missing url env", cfg: StorageConfig{Provider: StorageProviderPostgres}, wantErr: "invalid postgres config: url_env must not be empty"},
+		{name: "postgres negative max open conns", cfg: StorageConfig{Provider: StorageProviderPostgres, Postgres: PostgresConfig{URLEnv: "NOVELFORGE_DATABASE_URL", MaxOpenConns: -1}}, wantErr: "max_open_conns must be greater than or equal to 0"},
+		{name: "postgres idle larger than open", cfg: StorageConfig{Provider: StorageProviderPostgres, Postgres: PostgresConfig{URLEnv: "NOVELFORGE_DATABASE_URL", MaxOpenConns: 5, MaxIdleConns: 6}}, wantErr: "max_idle_conns must be less than or equal to max_open_conns"},
 	}
 
 	for _, tt := range tests {
@@ -56,7 +60,7 @@ func TestStorageConfigValidate(t *testing.T) {
 
 func TestAppConfigValidateIncludesStorage(t *testing.T) {
 	cfg := validAppConfig()
-	cfg.Storage.Provider = "sqlite"
+	cfg.Storage = StorageConfig{Provider: StorageProviderPostgres}
 
 	err := cfg.Validate()
 	if err == nil {
