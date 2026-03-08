@@ -22,7 +22,7 @@
   - `GET /api/v1/assets/:assetID`
   - `PUT /api/v1/assets/:assetID`
   - `DELETE /api/v1/assets/:assetID`
-- LLM 抽象与占位工厂装配（尚未接入业务链路）
+- 已接入 OpenAI 兼容 LLM 客户端装配与 Prompt 模板注册表（尚未接入具体生成业务链路）
 
 ### 领域模型层 (`internal/domain`)
 
@@ -93,7 +93,7 @@ V1 全部 6 个领域聚合已落地，每个聚合包含实体定义（`model.g
 
 ## 配置说明
 
-默认示例配置已指向 PostgreSQL：
+默认示例配置已指向 PostgreSQL，并启用 OpenAI 兼容 LLM provider：
 
 ```yaml
 storage:
@@ -103,7 +103,29 @@ storage:
     max_open_conns: 10
     max_idle_conns: 5
     conn_max_lifetime_seconds: 300
+
+llm:
+  provider: "openai_compatible"
+  model: "gpt-4o-mini"
+  base_url: "https://api.openai.com/v1"
+  api_key_env: "NOVELFORGE_LLM_API_KEY"
+  timeout_seconds: 60
+  prompts:
+    asset_generation: "asset_generation.yaml"
+    chapter_generation: "chapter_generation.yaml"
 ```
+
+Prompt 模板文件位于：
+
+- `internal/infra/llm/prompts/asset_generation.yaml`
+- `internal/infra/llm/prompts/chapter_generation.yaml`
+
+当前模板文件固定包含两个顶层字段：
+
+- `system`
+- `user`
+
+Prompt 模板内容通过 `go:embed` 编译进二进制。服务启动时会按配置预加载并校验模板文件语法；修改模板文件后需要重新构建并重新部署服务。当前仅完成基础设施装配，尚未把模板渲染链路接入具体章节/对话生成业务。
 
 数据库 schema 迁移文件位于：
 
@@ -125,11 +147,12 @@ go test ./...
 
 - 项目 / 资产 HTTP handler 集成测试（基于内存仓储）
 - PostgreSQL repository SQL 路径测试（基于 sqlmock）
+- LLM 配置校验、OpenAI 兼容客户端工厂与 Prompt Store 加载测试
 - 本地 PostgreSQL 运行态验证流程：先执行 `go run ./cmd/migrate -config configs/config.yaml`，再启动 `go run ./cmd/server -config configs/config.yaml`
 
 ## 当前刻意保留的边界
 
 - priority #2 的项目 / 资产链路已完成，但对话、章节生成、当前稿确认、指标采集等后续业务接口尚未实现
-- 尚未提供具体的 LLM Provider 客户端实现；工厂目前仅返回占位客户端元数据
+- 当前只完成 OpenAI 兼容客户端与 Prompt 模板基础设施装配，尚未接入 `service/conversation`、`service/generation` 或新增生成相关 handler / route
 - `postgres` 模式下服务启动不会自动执行 migration；当前仍要求先显式运行 `cmd/migrate`
 - `memory` provider 仍然保留，但目标是用于测试而不是默认运行态持久化

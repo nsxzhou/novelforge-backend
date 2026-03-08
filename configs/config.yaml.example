@@ -13,7 +13,11 @@ storage:
     conn_max_lifetime_seconds: 300
 
 llm:
-  provider: "placeholder"
-  model: "placeholder-model"
-  base_url: ""
+  provider: "openai_compatible"
+  model: "gpt-4o-mini"
+  base_url: "https://api.openai.com/v1"
   api_key_env: "NOVELFORGE_LLM_API_KEY"
+  timeout_seconds: 60
+  prompts:
+    asset_generation: "asset_generation.yaml"
+    chapter_generation: "chapter_generation.yaml"

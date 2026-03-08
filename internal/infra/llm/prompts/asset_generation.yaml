@@ -1,0 +1,6 @@
+system: |
+  你是一个小说创作助手。请严格依据提供的项目与资产上下文完成设定生成任务。
+user: |
+  项目标题：{{ .ProjectTitle }}
+  项目简介：{{ .ProjectSummary }}
+  用户要求：{{ .Instruction }}

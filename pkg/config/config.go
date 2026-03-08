@@ -3,6 +3,7 @@ package config
 import (
 	"fmt"
 	"os"
+	"strings"
 
 	"gopkg.in/yaml.v3"
 )
@@ -10,6 +11,8 @@ import (
 const (
 	StorageProviderMemory   = "memory"
 	StorageProviderPostgres = "postgres"
+
+	LLMProviderOpenAICompatible = "openai_compatible"
 )
 
 // AppConfig holds all runtime configuration for the service.
@@ -41,12 +44,17 @@ type PostgresConfig struct {
 	ConnMaxLifetimeSeconds int    `yaml:"conn_max_lifetime_seconds"`
 }
 
+// PromptConfig maps generation kinds to prompt template file names.
+type PromptConfig map[string]string
+
 // LLMConfig holds LLM provider wiring options.
 type LLMConfig struct {
-	Provider  string `yaml:"provider"`
-	Model     string `yaml:"model"`
-	BaseURL   string `yaml:"base_url"`
-	APIKeyEnv string `yaml:"api_key_env"`
+	Provider       string       `yaml:"provider"`
+	Model          string       `yaml:"model"`
+	BaseURL        string       `yaml:"base_url"`
+	APIKeyEnv      string       `yaml:"api_key_env"`
+	TimeoutSeconds int          `yaml:"timeout_seconds"`
+	Prompts        PromptConfig `yaml:"prompts"`
 }
 
 // Load loads configuration from YAML file and validates it.
@@ -143,16 +151,66 @@ func (c PostgresConfig) Validate() error {
 	return nil
 }
 
+// Validate validates prompt configuration.
+func (c PromptConfig) Validate() error {
+	requiredKinds := []string{
+		"asset_generation",
+		"chapter_generation",
+	}
+	allowedKinds := map[string]struct{}{
+		"asset_generation":     {},
+		"chapter_generation":   {},
+		"chapter_continuation": {},
+		"chapter_rewrite":      {},
+	}
+
+	for _, kind := range requiredKinds {
+		filename, ok := c[kind]
+		if !ok || strings.TrimSpace(filename) == "" {
+			return fmt.Errorf("%s must not be empty", kind)
+		}
+	}
+
+	for kind, filename := range c {
+		if strings.TrimSpace(kind) == "" {
+			return fmt.Errorf("prompt kind must not be empty")
+		}
+		if _, ok := allowedKinds[kind]; !ok {
+			return fmt.Errorf("%q is not a supported prompt kind", kind)
+		}
+		if strings.TrimSpace(filename) == "" {
+			return fmt.Errorf("%s must not be empty", kind)
+		}
+	}
+
+	return nil
+}
+
 // Validate validates LLM configuration.
 func (c LLMConfig) Validate() error {
 	if c.Provider == "" {
 		return fmt.Errorf("provider must not be empty")
 	}
-	if c.Model == "" {
-		return fmt.Errorf("model must not be empty")
+
+	switch c.Provider {
+	case LLMProviderOpenAICompatible:
+		if strings.TrimSpace(c.Model) == "" {
+			return fmt.Errorf("model must not be empty")
+		}
+		if strings.TrimSpace(c.BaseURL) == "" {
+			return fmt.Errorf("base_url must not be empty")
+		}
+		if strings.TrimSpace(c.APIKeyEnv) == "" {
+			return fmt.Errorf("api_key_env must not be empty")
+		}
+		if c.TimeoutSeconds <= 0 {
+			return fmt.Errorf("timeout_seconds must be greater than 0")
+		}
+		if err := c.Prompts.Validate(); err != nil {
+			return fmt.Errorf("invalid prompts config: %w", err)
+		}
+		return nil
+	default:
+		return fmt.Errorf("provider must be %q", LLMProviderOpenAICompatible)
 	}
-	if c.APIKeyEnv == "" {
-		return fmt.Errorf("api_key_env must not be empty")
-	}
-	return nil
 }

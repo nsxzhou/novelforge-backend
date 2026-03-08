@@ -3,9 +3,11 @@ package app
 import (
 	"fmt"
 	"os"
+	"strings"
 
 	httpinfra "novelforge/backend/internal/infra/http"
 	"novelforge/backend/internal/infra/llm"
+	"novelforge/backend/internal/infra/llm/prompts"
 	"novelforge/backend/internal/infra/storage"
 	assetservice "novelforge/backend/internal/service/asset"
 	projectservice "novelforge/backend/internal/service/project"
@@ -14,11 +16,24 @@ import (
 	"github.com/cloudwego/hertz/pkg/app/server"
 )
 
+var (
+	newRepositories   = storage.NewRepositories
+	newLLMClient      = llm.NewClient
+	loadPromptStore   = prompts.LoadStore
+	closeRepositories = func(repositories *storage.Repositories) error {
+		if repositories == nil {
+			return nil
+		}
+		return repositories.Close()
+	}
+)
+
 // Bootstrap 为后端服务连接运行时依赖。
 type Bootstrap struct {
 	Config       *config.AppConfig
 	HTTP         *server.Hertz
 	LLMClient    llm.Client
+	PromptStore  *prompts.Store
 	Repositories *storage.Repositories
 }
 
@@ -29,20 +44,27 @@ func LoadBootstrap(configPath string) (*Bootstrap, error) {
 		return nil, fmt.Errorf("load config: %w", err)
 	}
 
-	repositories, err := storage.NewRepositories(cfg.Storage)
+	repositories, err := newRepositories(cfg.Storage)
 	if err != nil {
 		return nil, fmt.Errorf("init repositories: %w", err)
 	}
 
-	if _, exists := os.LookupEnv(cfg.LLM.APIKeyEnv); !exists {
-		_ = repositories.Close()
-		return nil, fmt.Errorf("required environment variable %q is not set", cfg.LLM.APIKeyEnv)
+	apiKey, exists := os.LookupEnv(cfg.LLM.APIKeyEnv)
+	if !exists || strings.TrimSpace(apiKey) == "" {
+		_ = closeRepositories(repositories)
+		return nil, fmt.Errorf("required environment variable %q is not set or empty", cfg.LLM.APIKeyEnv)
 	}
 
-	llmClient, err := llm.NewClient(cfg.LLM)
+	llmClient, err := newLLMClient(cfg.LLM)
 	if err != nil {
-		_ = repositories.Close()
+		_ = closeRepositories(repositories)
 		return nil, fmt.Errorf("init llm client: %w", err)
+	}
+
+	promptStore, err := loadPromptStore(cfg.LLM.Prompts)
+	if err != nil {
+		_ = closeRepositories(repositories)
+		return nil, fmt.Errorf("load prompt store: %w", err)
 	}
 
 	projectUseCase := projectservice.NewUseCase(projectservice.Dependencies{Projects: repositories.Projects})
@@ -61,14 +83,15 @@ func LoadBootstrap(configPath string) (*Bootstrap, error) {
 		Config:       cfg,
 		HTTP:         httpServer,
 		LLMClient:    llmClient,
+		PromptStore:  promptStore,
 		Repositories: repositories,
 	}, nil
 }
 
 // Close 释放引导(bootstrap)资源。
 func (b *Bootstrap) Close() error {
-	if b == nil || b.Repositories == nil {
+	if b == nil {
 		return nil
 	}
-	return b.Repositories.Close()
+	return closeRepositories(b.Repositories)
 }

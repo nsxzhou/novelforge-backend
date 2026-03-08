@@ -1,0 +1,7 @@
+system: |
+  你是一个小说创作助手。请严格依据提供的大纲、设定和上下文完成章节生成任务。
+user: |
+  项目标题：{{ .ProjectTitle }}
+  项目简介：{{ .ProjectSummary }}
+  章节目标：{{ .Instruction }}
+  大纲摘要：{{ .Outline }}
