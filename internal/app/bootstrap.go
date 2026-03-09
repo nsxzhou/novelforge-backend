@@ -10,6 +10,8 @@ import (
 	"novelforge/backend/internal/infra/llm/prompts"
 	"novelforge/backend/internal/infra/storage"
 	assetservice "novelforge/backend/internal/service/asset"
+	chapterservice "novelforge/backend/internal/service/chapter"
+	conversationservice "novelforge/backend/internal/service/conversation"
 	projectservice "novelforge/backend/internal/service/project"
 	"novelforge/backend/pkg/config"
 
@@ -72,11 +74,28 @@ func LoadBootstrap(configPath string) (*Bootstrap, error) {
 		Assets:   repositories.Assets,
 		Projects: repositories.Projects,
 	})
+	chapterUseCase := chapterservice.NewUseCase(chapterservice.Dependencies{
+		Chapters:          repositories.Chapters,
+		Projects:          repositories.Projects,
+		Assets:            repositories.Assets,
+		GenerationRecords: repositories.GenerationRecords,
+		LLMClient:         llmClient,
+		PromptStore:       promptStore,
+	})
+	conversationUseCase := conversationservice.NewUseCase(conversationservice.Dependencies{
+		Conversations: repositories.Conversations,
+		Projects:      repositories.Projects,
+		Assets:        repositories.Assets,
+		LLMClient:     llmClient,
+		PromptStore:   promptStore,
+	})
 
 	httpServer := httpinfra.NewServer(cfg.Server, httpinfra.Dependencies{
-		Projects:  projectUseCase,
-		Assets:    assetUseCase,
-		Readiness: repositories,
+		Projects:      projectUseCase,
+		Assets:        assetUseCase,
+		Chapters:      chapterUseCase,
+		Conversations: conversationUseCase,
+		Readiness:     repositories,
 	})
 
 	return &Bootstrap{

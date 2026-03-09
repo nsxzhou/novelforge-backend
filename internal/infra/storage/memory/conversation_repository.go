@@ -53,6 +53,24 @@ func (r *ConversationRepository) GetByID(_ context.Context, id string) (*convers
 	return cloneConversation(entity), nil
 }
 
+func (r *ConversationRepository) Update(_ context.Context, entity *conversation.Conversation) error {
+	if entity == nil {
+		return fmt.Errorf("conversation must not be nil")
+	}
+	if err := entity.Validate(); err != nil {
+		return err
+	}
+
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	if _, exists := r.items[entity.ID]; !exists {
+		return ErrNotFound
+	}
+	r.items[entity.ID] = cloneConversation(entity)
+	return nil
+}
+
 func (r *ConversationRepository) AppendMessage(_ context.Context, params conversation.AppendMessageParams) error {
 	if params.ConversationID == "" {
 		return fmt.Errorf("conversation_id must not be empty")

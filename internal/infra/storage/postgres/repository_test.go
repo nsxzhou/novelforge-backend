@@ -506,10 +506,10 @@ func TestConversationRepositoryAppendMessage(t *testing.T) {
 	targetID := uuid.NewString()
 	message1 := conversationdomain.Message{ID: uuid.NewString(), Role: conversationdomain.MessageRoleUser, Content: "Hello", CreatedAt: now}
 	message2 := conversationdomain.Message{ID: uuid.NewString(), Role: conversationdomain.MessageRoleAssistant, Content: "Draft ready", CreatedAt: now.Add(time.Minute)}
-	rows := sqlmock.NewRows([]string{"id", "project_id", "target_type", "target_id", "messages", "created_at", "updated_at"}).
-		AddRow(conversationID, projectID, conversationdomain.TargetTypeProject, targetID, `[{"id":"`+message1.ID+`","role":"user","content":"Hello","created_at":"2026-03-07T12:00:00Z"}]`, now, now)
+	rows := sqlmock.NewRows([]string{"id", "project_id", "target_type", "target_id", "messages", "pending_suggestion", "created_at", "updated_at"}).
+		AddRow(conversationID, projectID, conversationdomain.TargetTypeProject, targetID, `[{"id":"`+message1.ID+`","role":"user","content":"Hello","created_at":"2026-03-07T12:00:00Z"}]`, `null`, now, now)
 	mock.ExpectQuery(regexp.QuoteMeta(`
-		SELECT id, project_id, target_type, target_id, messages, created_at, updated_at
+		SELECT id, project_id, target_type, target_id, messages, pending_suggestion, created_at, updated_at
 		FROM conversations
 		WHERE id = $1
 	`)).WithArgs(conversationID).WillReturnRows(rows)

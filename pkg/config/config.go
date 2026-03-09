@@ -156,12 +156,18 @@ func (c PromptConfig) Validate() error {
 	requiredKinds := []string{
 		"asset_generation",
 		"chapter_generation",
+		"chapter_continuation",
+		"chapter_rewrite",
+		"project_refinement",
+		"asset_refinement",
 	}
 	allowedKinds := map[string]struct{}{
 		"asset_generation":     {},
 		"chapter_generation":   {},
 		"chapter_continuation": {},
 		"chapter_rewrite":      {},
+		"project_refinement":   {},
+		"asset_refinement":     {},
 	}
 
 	for _, kind := range requiredKinds {

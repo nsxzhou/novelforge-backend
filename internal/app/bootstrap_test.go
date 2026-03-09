@@ -42,7 +42,11 @@ func validLLMConfigBlock(apiKeyEnv string) string {
 		"  timeout_seconds: 60\n" +
 		"  prompts:\n" +
 		"    asset_generation: \"asset_generation.yaml\"\n" +
-		"    chapter_generation: \"chapter_generation.yaml\"\n"
+		"    chapter_generation: \"chapter_generation.yaml\"\n" +
+		"    chapter_continuation: \"chapter_continuation.yaml\"\n" +
+		"    chapter_rewrite: \"chapter_rewrite.yaml\"\n" +
+		"    project_refinement: \"project_refinement.yaml\"\n" +
+		"    asset_refinement: \"asset_refinement.yaml\"\n"
 }
 
 type stubLLMClient struct{}
@@ -158,5 +162,8 @@ func TestLoadBootstrapSuccessWiresPromptStore(t *testing.T) {
 	}
 	if _, ok := bootstrap.PromptStore.Get("asset_generation"); !ok {
 		t.Fatal("PromptStore.Get(asset_generation) = false, want true")
+	}
+	if _, ok := bootstrap.PromptStore.Get("project_refinement"); !ok {
+		t.Fatal("PromptStore.Get(project_refinement) = false, want true")
 	}
 }

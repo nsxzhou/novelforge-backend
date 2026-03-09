@@ -1,6 +1,7 @@
 package prompts
 
 import (
+	"bytes"
 	"embed"
 	"fmt"
 	"io/fs"
@@ -29,6 +30,23 @@ type Template struct {
 
 	systemTemplate *texttemplate.Template
 	userTemplate   *texttemplate.Template
+}
+
+// Render executes both system and user templates with the provided data.
+func (t *Template) Render(data any) (string, string, error) {
+	if t == nil {
+		return "", "", fmt.Errorf("template must not be nil")
+	}
+
+	system, err := renderTextTemplate(t.systemTemplate, data)
+	if err != nil {
+		return "", "", fmt.Errorf("render system template: %w", err)
+	}
+	user, err := renderTextTemplate(t.userTemplate, data)
+	if err != nil {
+		return "", "", fmt.Errorf("render user template: %w", err)
+	}
+	return system, user, nil
 }
 
 // Store keeps prompt templates keyed by generation kind.
@@ -96,4 +114,12 @@ func loadTemplate(kind, filename string) (*Template, error) {
 		systemTemplate: systemTemplate,
 		userTemplate:   userTemplate,
 	}, nil
+}
+
+func renderTextTemplate(tmpl *texttemplate.Template, data any) (string, error) {
+	var buffer bytes.Buffer
+	if err := tmpl.Execute(&buffer, data); err != nil {
+		return "", err
+	}
+	return buffer.String(), nil
 }

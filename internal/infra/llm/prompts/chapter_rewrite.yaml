@@ -1,0 +1,24 @@
+system: |
+  你是一个小说创作助手。请根据已有章节正文、指定待改写片段和改写要求，返回完整更新后的章节正文。
+  只返回完整章节正文，不要添加解释、标注或额外说明。
+user: |
+  项目标题：{{ .ProjectTitle }}
+  项目简介：{{ .ProjectSummary }}
+  章节标题：{{ .ChapterTitle }}
+  章节序号：{{ .ChapterOrdinal }}
+  大纲上下文：
+  {{ .OutlineContext }}
+
+  世界观上下文：
+  {{ .WorldbuildingContext }}
+
+  角色上下文：
+  {{ .CharacterContext }}
+
+  当前章节正文：
+  {{ .CurrentChapterContent }}
+
+  需要改写的原文：
+  {{ .TargetText }}
+
+  改写要求：{{ .Instruction }}

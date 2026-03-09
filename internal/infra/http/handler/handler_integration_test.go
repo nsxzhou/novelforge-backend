@@ -7,13 +7,19 @@ import (
 	"errors"
 	"strings"
 	"testing"
+	"time"
 
 	assetdomain "novelforge/backend/internal/domain/asset"
+	chapterdomain "novelforge/backend/internal/domain/chapter"
+	conversationdomain "novelforge/backend/internal/domain/conversation"
+	generationdomain "novelforge/backend/internal/domain/generation"
 	projectdomain "novelforge/backend/internal/domain/project"
 	httpinfra "novelforge/backend/internal/infra/http"
 	"novelforge/backend/internal/infra/storage/memory"
 	appservice "novelforge/backend/internal/service"
 	assetservice "novelforge/backend/internal/service/asset"
+	chapterservice "novelforge/backend/internal/service/chapter"
+	conversationservice "novelforge/backend/internal/service/conversation"
 	projectservice "novelforge/backend/internal/service/project"
 	"novelforge/backend/pkg/config"
 
@@ -47,6 +53,79 @@ type assetResponse struct {
 
 type assetListResponse struct {
 	Assets []assetResponse `json:"assets"`
+}
+
+type chapterResponse struct {
+	ID                      string  `json:"id"`
+	ProjectID               string  `json:"project_id"`
+	Title                   string  `json:"title"`
+	Ordinal                 int     `json:"ordinal"`
+	Status                  string  `json:"status"`
+	Content                 string  `json:"content"`
+	CurrentDraftID          string  `json:"current_draft_id,omitempty"`
+	CurrentDraftConfirmedAt *string `json:"current_draft_confirmed_at,omitempty"`
+	CurrentDraftConfirmedBy string  `json:"current_draft_confirmed_by,omitempty"`
+	CreatedAt               string  `json:"created_at"`
+	UpdatedAt               string  `json:"updated_at"`
+}
+
+type chapterListResponse struct {
+	Chapters []chapterResponse `json:"chapters"`
+}
+
+type generationRecordResponse struct {
+	ID               string `json:"id"`
+	ProjectID        string `json:"project_id"`
+	ChapterID        string `json:"chapter_id,omitempty"`
+	ConversationID   string `json:"conversation_id,omitempty"`
+	Kind             string `json:"kind"`
+	Status           string `json:"status"`
+	InputSnapshotRef string `json:"input_snapshot_ref"`
+	OutputRef        string `json:"output_ref"`
+	TokenUsage       int    `json:"token_usage"`
+	DurationMillis   int64  `json:"duration_millis"`
+	ErrorMessage     string `json:"error_message,omitempty"`
+	CreatedAt        string `json:"created_at"`
+	UpdatedAt        string `json:"updated_at"`
+}
+
+type chapterGenerationResponse struct {
+	Chapter          chapterResponse          `json:"chapter"`
+	GenerationRecord generationRecordResponse `json:"generation_record"`
+}
+
+type conversationMessageResponse struct {
+	ID        string `json:"id"`
+	Role      string `json:"role"`
+	Content   string `json:"content"`
+	CreatedAt string `json:"created_at"`
+}
+
+type pendingSuggestionResponse struct {
+	Title   string `json:"title,omitempty"`
+	Summary string `json:"summary,omitempty"`
+	Content string `json:"content,omitempty"`
+}
+
+type conversationResponse struct {
+	ID                string                      `json:"id"`
+	ProjectID         string                      `json:"project_id"`
+	TargetType        string                      `json:"target_type"`
+	TargetID          string                      `json:"target_id"`
+	Messages          []conversationMessageResponse `json:"messages"`
+	PendingSuggestion *pendingSuggestionResponse  `json:"pending_suggestion"`
+	CreatedAt         string                      `json:"created_at"`
+	UpdatedAt         string                      `json:"updated_at"`
+}
+
+type conversationListResponse struct {
+	Conversations []conversationResponse `json:"conversations"`
+}
+
+type confirmConversationResponse struct {
+	Conversation conversationResponse `json:"conversation"`
+	Project      *projectResponse     `json:"project,omitempty"`
+	Asset        *assetResponse       `json:"asset,omitempty"`
 }
 
 func TestProjectAndAssetRoutesIntegration(t *testing.T) {
@@ -235,6 +314,7 @@ func TestServiceErrorMappingIntegration(t *testing.T) {
 				},
 			},
 			stubAssetUseCase{},
+			stubConversationUseCase{},
 		)
 
 		recorder := performJSONRequest(h, consts.MethodPost, "/api/v1/projects", `{"title":"Novel","summary":"Story summary","status":"draft"}`)
@@ -250,6 +330,7 @@ func TestServiceErrorMappingIntegration(t *testing.T) {
 					return nil, errors.New("database offline")
 				},
 			},
+			stubConversationUseCase{},
 		)
 
 		recorder := performRequest(h, consts.MethodGet, "/api/v1/assets/11111111-1111-1111-1111-111111111111", "")
@@ -258,19 +339,493 @@ func TestServiceErrorMappingIntegration(t *testing.T) {
 	})
 }
 
+func TestConversationRoutesIntegration(t *testing.T) {
+	const (
+		projectID      = "11111111-1111-1111-1111-111111111111"
+		conversationID = "33333333-3333-3333-3333-333333333333"
+	)
+
+	baseTime := time.Date(2026, 3, 9, 12, 0, 0, 0, time.UTC)
+	startedConversation := &conversationdomain.Conversation{
+		ID:         conversationID,
+		ProjectID:  projectID,
+		TargetType: conversationdomain.TargetTypeProject,
+		TargetID:   projectID,
+		Messages: []conversationdomain.Message{
+			{ID: "44444444-4444-4444-4444-444444444444", Role: conversationdomain.MessageRoleUser, Content: "Polish the project title.", CreatedAt: baseTime},
+			{ID: "55555555-5555-5555-5555-555555555555", Role: conversationdomain.MessageRoleAssistant, Content: `{"title":"Refined title","summary":"Refined summary"}`, CreatedAt: baseTime.Add(time.Minute)},
+		},
+		PendingSuggestion: &conversationdomain.PendingSuggestion{Title: "Refined title", Summary: "Refined summary"},
+		CreatedAt:         baseTime,
+		UpdatedAt:         baseTime.Add(time.Minute),
+	}
+	updatedConversation := &conversationdomain.Conversation{
+		ID:         conversationID,
+		ProjectID:  projectID,
+		TargetType: conversationdomain.TargetTypeProject,
+		TargetID:   projectID,
+		Messages: []conversationdomain.Message{
+			{ID: "44444444-4444-4444-4444-444444444444", Role: conversationdomain.MessageRoleUser, Content: "Polish the project title.", CreatedAt: baseTime},
+			{ID: "55555555-5555-5555-5555-555555555555", Role: conversationdomain.MessageRoleAssistant, Content: `{"title":"Refined title","summary":"Refined summary"}`, CreatedAt: baseTime.Add(time.Minute)},
+			{ID: "66666666-6666-6666-6666-666666666666", Role: conversationdomain.MessageRoleUser, Content: "Make it darker.", CreatedAt: baseTime.Add(2 * time.Minute)},
+			{ID: "77777777-7777-7777-7777-777777777777", Role: conversationdomain.MessageRoleAssistant, Content: `{"title":"Updated title","summary":"Updated summary"}`, CreatedAt: baseTime.Add(3 * time.Minute)},
+		},
+		PendingSuggestion: &conversationdomain.PendingSuggestion{Title: "Updated title", Summary: "Updated summary"},
+		CreatedAt:         baseTime,
+		UpdatedAt:         baseTime.Add(3 * time.Minute),
+	}
+	confirmedConversation := &conversationdomain.Conversation{
+		ID:         conversationID,
+		ProjectID:  projectID,
+		TargetType: conversationdomain.TargetTypeProject,
+		TargetID:   projectID,
+		Messages: []conversationdomain.Message{
+			{ID: "44444444-4444-4444-4444-444444444444", Role: conversationdomain.MessageRoleUser, Content: "Polish the project title.", CreatedAt: baseTime},
+			{ID: "55555555-5555-5555-5555-555555555555", Role: conversationdomain.MessageRoleAssistant, Content: `{"title":"Refined title","summary":"Refined summary"}`, CreatedAt: baseTime.Add(time.Minute)},
+			{ID: "66666666-6666-6666-6666-666666666666", Role: conversationdomain.MessageRoleUser, Content: "Make it darker.", CreatedAt: baseTime.Add(2 * time.Minute)},
+			{ID: "77777777-7777-7777-7777-777777777777", Role: conversationdomain.MessageRoleAssistant, Content: `{"title":"Updated title","summary":"Updated summary"}`, CreatedAt: baseTime.Add(3 * time.Minute)},
+			{ID: "88888888-8888-8888-8888-888888888888", Role: conversationdomain.MessageRoleSystem, Content: "Confirmed the latest project suggestion and applied it to the project.", CreatedAt: baseTime.Add(4 * time.Minute)},
+		},
+		CreatedAt: baseTime,
+		UpdatedAt: baseTime.Add(4 * time.Minute),
+	}
+	confirmedProject := &projectdomain.Project{
+		ID:        projectID,
+		Title:     "Final title",
+		Summary:   "Final summary",
+		Status:    projectdomain.StatusDraft,
+		CreatedAt: baseTime.Add(-time.Hour),
+		UpdatedAt: baseTime.Add(4 * time.Minute),
+	}
+
+	h := newTestServerWithUseCases(
+		stubProjectUseCase{},
+		stubAssetUseCase{},
+		stubConversationUseCase{
+			start: func(_ context.Context, params conversationservice.StartParams) (*conversationdomain.Conversation, error) {
+				if params.ProjectID != projectID || params.TargetType != conversationdomain.TargetTypeProject || params.TargetID != projectID || params.Message != "Polish the project title." {
+					t.Fatalf("Start params = %#v, want expected project conversation payload", params)
+				}
+				return startedConversation, nil
+			},
+			reply: func(_ context.Context, params conversationservice.ReplyParams) (*conversationdomain.Conversation, error) {
+				if params.ConversationID != conversationID || params.Message != "Make it darker." {
+					t.Fatalf("Reply params = %#v, want expected reply payload", params)
+				}
+				return updatedConversation, nil
+			},
+			getByID: func(_ context.Context, id string) (*conversationdomain.Conversation, error) {
+				if id != conversationID {
+					t.Fatalf("GetByID id = %q, want %q", id, conversationID)
+				}
+				return updatedConversation, nil
+			},
+			list: func(_ context.Context, params conversationservice.ListParams) ([]*conversationdomain.Conversation, error) {
+				if params.ProjectID != projectID || params.TargetType != conversationdomain.TargetTypeProject || params.TargetID != projectID || params.Limit != 10 || params.Offset != 0 {
+					t.Fatalf("List params = %#v, want expected list payload", params)
+				}
+				return []*conversationdomain.Conversation{updatedConversation}, nil
+			},
+			confirm: func(_ context.Context, id string) (*conversationservice.ConfirmResult, error) {
+				if id != conversationID {
+					t.Fatalf("Confirm id = %q, want %q", id, conversationID)
+				}
+				return &conversationservice.ConfirmResult{Conversation: confirmedConversation, Project: confirmedProject}, nil
+			},
+		},
+	)
+
+	startRecorder := performJSONRequest(h, consts.MethodPost, "/api/v1/projects/"+projectID+"/conversations", `{"target_type":"project","target_id":"11111111-1111-1111-1111-111111111111","message":"Polish the project title."}`)
+	assertStatusCode(t, startRecorder.Code, consts.StatusCreated)
+	var started conversationResponse
+	decodeResponseBody(t, startRecorder, &started)
+	if started.ID != conversationID || started.PendingSuggestion == nil || started.PendingSuggestion.Title != "Refined title" {
+		t.Fatalf("started conversation = %#v, want pending project suggestion", started)
+	}
+	if len(started.Messages) != 2 {
+		t.Fatalf("len(started messages) = %d, want 2", len(started.Messages))
+	}
+
+	replyRecorder := performJSONRequest(h, consts.MethodPost, "/api/v1/conversations/"+conversationID+"/messages", `{"message":"Make it darker."}`)
+	assertStatusCode(t, replyRecorder.Code, consts.StatusOK)
+	var replied conversationResponse
+	decodeResponseBody(t, replyRecorder, &replied)
+	if replied.PendingSuggestion == nil || replied.PendingSuggestion.Title != "Updated title" || replied.PendingSuggestion.Summary != "Updated summary" {
+		t.Fatalf("replied conversation = %#v, want updated pending suggestion", replied)
+	}
+	if len(replied.Messages) != 4 {
+		t.Fatalf("len(replied messages) = %d, want 4", len(replied.Messages))
+	}
+
+	getRecorder := performRequest(h, consts.MethodGet, "/api/v1/conversations/"+conversationID, "")
+	assertStatusCode(t, getRecorder.Code, consts.StatusOK)
+	var got conversationResponse
+	decodeResponseBody(t, getRecorder, &got)
+	if got.ID != conversationID || len(got.Messages) != 4 {
+		t.Fatalf("get conversation = %#v, want updated conversation", got)
+	}
+
+	listRecorder := performRequest(h, consts.MethodGet, "/api/v1/projects/"+projectID+"/conversations?target_type=project&target_id="+projectID+"&limit=10&offset=0", "")
+	assertStatusCode(t, listRecorder.Code, consts.StatusOK)
+	var listed conversationListResponse
+	decodeResponseBody(t, listRecorder, &listed)
+	if len(listed.Conversations) != 1 || listed.Conversations[0].ID != conversationID {
+		t.Fatalf("listed conversations = %#v, want single updated conversation", listed.Conversations)
+	}
+
+	confirmRecorder := performRequest(h, consts.MethodPost, "/api/v1/conversations/"+conversationID+"/confirm", "")
+	assertStatusCode(t, confirmRecorder.Code, consts.StatusOK)
+	var confirmed confirmConversationResponse
+	decodeResponseBody(t, confirmRecorder, &confirmed)
+	if confirmed.Project == nil || confirmed.Project.Title != "Final title" || confirmed.Project.Summary != "Final summary" {
+		t.Fatalf("confirmed project = %#v, want final project payload", confirmed.Project)
+	}
+	if confirmed.Conversation.PendingSuggestion != nil {
+		t.Fatalf("confirmed pending suggestion = %#v, want nil", confirmed.Conversation.PendingSuggestion)
+	}
+	if got := confirmed.Conversation.Messages[len(confirmed.Conversation.Messages)-1].Role; got != conversationdomain.MessageRoleSystem {
+		t.Fatalf("confirmed last role = %q, want system", got)
+	}
+}
+
+func TestConversationRouteValidationAndErrorMappingIntegration(t *testing.T) {
+	const (
+		projectID      = "11111111-1111-1111-1111-111111111111"
+		conversationID = "33333333-3333-3333-3333-333333333333"
+	)
+
+	t.Run("start malformed json returns 400", func(t *testing.T) {
+		h := newTestServerWithUseCases(stubProjectUseCase{}, stubAssetUseCase{}, stubConversationUseCase{})
+		recorder := performJSONRequest(h, consts.MethodPost, "/api/v1/projects/"+projectID+"/conversations", `{"target_type":`)
+		assertStatusCode(t, recorder.Code, consts.StatusBadRequest)
+		assertErrorResponse(t, recorder)
+	})
+
+	t.Run("reply malformed json returns 400", func(t *testing.T) {
+		h := newTestServerWithUseCases(stubProjectUseCase{}, stubAssetUseCase{}, stubConversationUseCase{})
+		recorder := performJSONRequest(h, consts.MethodPost, "/api/v1/conversations/"+conversationID+"/messages", `{"message":`)
+		assertStatusCode(t, recorder.Code, consts.StatusBadRequest)
+		assertErrorResponse(t, recorder)
+	})
+
+	t.Run("list invalid query returns 400", func(t *testing.T) {
+		h := newTestServerWithUseCases(stubProjectUseCase{}, stubAssetUseCase{}, stubConversationUseCase{})
+		recorder := performRequest(h, consts.MethodGet, "/api/v1/projects/"+projectID+"/conversations?target_type=", "")
+		assertStatusCode(t, recorder.Code, consts.StatusBadRequest)
+		assertErrorContains(t, recorder, "target_type must not be empty")
+	})
+
+	t.Run("start invalid input maps to 400", func(t *testing.T) {
+		h := newTestServerWithUseCases(
+			stubProjectUseCase{},
+			stubAssetUseCase{},
+			stubConversationUseCase{
+				start: func(context.Context, conversationservice.StartParams) (*conversationdomain.Conversation, error) {
+					return nil, appservice.WrapInvalidInput(errors.New("target_type must be one of project, asset"))
+				},
+			},
+		)
+		recorder := performJSONRequest(h, consts.MethodPost, "/api/v1/projects/"+projectID+"/conversations", `{"target_type":"project","target_id":"11111111-1111-1111-1111-111111111111","message":"Polish the project title."}`)
+		assertStatusCode(t, recorder.Code, consts.StatusBadRequest)
+		assertErrorContains(t, recorder, "target_type must be one of project, asset")
+	})
+
+	t.Run("get not found maps to 404", func(t *testing.T) {
+		h := newTestServerWithUseCases(
+			stubProjectUseCase{},
+			stubAssetUseCase{},
+			stubConversationUseCase{
+				getByID: func(context.Context, string) (*conversationdomain.Conversation, error) {
+					return nil, appservice.WrapNotFound(errors.New("missing conversation"))
+				},
+			},
+		)
+		recorder := performRequest(h, consts.MethodGet, "/api/v1/conversations/"+conversationID, "")
+		assertStatusCode(t, recorder.Code, consts.StatusNotFound)
+		assertErrorContains(t, recorder, "missing conversation")
+	})
+
+	t.Run("confirm unexpected error maps to 500", func(t *testing.T) {
+		h := newTestServerWithUseCases(
+			stubProjectUseCase{},
+			stubAssetUseCase{},
+			stubConversationUseCase{
+				confirm: func(context.Context, string) (*conversationservice.ConfirmResult, error) {
+					return nil, errors.New("conversation repository offline")
+				},
+			},
+		)
+		recorder := performRequest(h, consts.MethodPost, "/api/v1/conversations/"+conversationID+"/confirm", "")
+		assertStatusCode(t, recorder.Code, consts.StatusInternalServerError)
+		assertErrorMessage(t, recorder, "internal server error")
+	})
+}
+
+func TestChapterRoutesIntegration(t *testing.T) {
+	const (
+		projectID            = "11111111-1111-1111-1111-111111111111"
+		chapterID            = "22222222-2222-2222-2222-222222222222"
+		generationID         = "33333333-3333-3333-3333-333333333333"
+		continuedGeneration  = "44444444-4444-4444-4444-444444444444"
+		rewrittenGeneration  = "55555555-5555-5555-5555-555555555555"
+	)
+
+	baseTime := time.Date(2026, 3, 9, 14, 0, 0, 0, time.UTC)
+	generatedChapter := &chapterdomain.Chapter{
+		ID:             chapterID,
+		ProjectID:      projectID,
+		Title:          "第一章 王城初见",
+		Ordinal:        1,
+		Status:         chapterdomain.StatusDraft,
+		Content:        "首章完整正文。",
+		CurrentDraftID: generationID,
+		CreatedAt:      baseTime,
+		UpdatedAt:      baseTime,
+	}
+	continuedChapter := &chapterdomain.Chapter{
+		ID:             chapterID,
+		ProjectID:      projectID,
+		Title:          "第一章 王城初见",
+		Ordinal:        1,
+		Status:         chapterdomain.StatusDraft,
+		Content:        "续写后的完整正文。",
+		CurrentDraftID: continuedGeneration,
+		CreatedAt:      baseTime,
+		UpdatedAt:      baseTime.Add(time.Minute),
+	}
+	rewrittenChapter := &chapterdomain.Chapter{
+		ID:             chapterID,
+		ProjectID:      projectID,
+		Title:          "第一章 王城初见",
+		Ordinal:        1,
+		Status:         chapterdomain.StatusDraft,
+		Content:        "局部改写后的完整正文。",
+		CurrentDraftID: rewrittenGeneration,
+		CreatedAt:      baseTime,
+		UpdatedAt:      baseTime.Add(2 * time.Minute),
+	}
+	generatedRecord := &generationdomain.GenerationRecord{
+		ID:               generationID,
+		ProjectID:        projectID,
+		ChapterID:        chapterID,
+		Kind:             generationdomain.KindChapterGeneration,
+		Status:           generationdomain.StatusSucceeded,
+		InputSnapshotRef: "generate input",
+		OutputRef:        generatedChapter.Content,
+		TokenUsage:       0,
+		DurationMillis:   12,
+		CreatedAt:        baseTime,
+		UpdatedAt:        baseTime,
+	}
+	continuedRecord := &generationdomain.GenerationRecord{
+		ID:               continuedGeneration,
+		ProjectID:        projectID,
+		ChapterID:        chapterID,
+		Kind:             generationdomain.KindChapterContinuation,
+		Status:           generationdomain.StatusSucceeded,
+		InputSnapshotRef: "continue input",
+		OutputRef:        continuedChapter.Content,
+		TokenUsage:       0,
+		DurationMillis:   18,
+		CreatedAt:        baseTime.Add(time.Minute),
+		UpdatedAt:        baseTime.Add(time.Minute),
+	}
+	rewrittenRecord := &generationdomain.GenerationRecord{
+		ID:               rewrittenGeneration,
+		ProjectID:        projectID,
+		ChapterID:        chapterID,
+		Kind:             generationdomain.KindChapterRewrite,
+		Status:           generationdomain.StatusSucceeded,
+		InputSnapshotRef: "rewrite input",
+		OutputRef:        rewrittenChapter.Content,
+		TokenUsage:       0,
+		DurationMillis:   21,
+		CreatedAt:        baseTime.Add(2 * time.Minute),
+		UpdatedAt:        baseTime.Add(2 * time.Minute),
+	}
+
+	h := newTestServerWithAllUseCases(
+		stubProjectUseCase{},
+		stubAssetUseCase{},
+		stubChapterUseCase{
+			generate: func(_ context.Context, params chapterservice.GenerateParams) (*chapterservice.GenerateResult, error) {
+				if params.ProjectID != projectID || params.Title != "第一章 王城初见" || params.Ordinal != 1 || params.Instruction != "写出主角第一次进入王城时的压迫感。" {
+					t.Fatalf("Generate params = %#v, want expected payload", params)
+				}
+				return &chapterservice.GenerateResult{Chapter: generatedChapter, GenerationRecord: generatedRecord}, nil
+			},
+			listByProject: func(_ context.Context, params chapterdomain.ListByProjectParams) ([]*chapterdomain.Chapter, error) {
+				if params.ProjectID != projectID || params.Limit != 10 || params.Offset != 0 {
+					t.Fatalf("ListByProject params = %#v, want expected payload", params)
+				}
+				return []*chapterdomain.Chapter{generatedChapter}, nil
+			},
+			getByID: func(_ context.Context, id string) (*chapterdomain.Chapter, error) {
+				if id != chapterID {
+					t.Fatalf("GetByID id = %q, want %q", id, chapterID)
+				}
+				return rewrittenChapter, nil
+			},
+			continueFn: func(_ context.Context, params chapterservice.ContinueParams) (*chapterservice.ContinueResult, error) {
+				if params.ChapterID != chapterID || params.Instruction != "继续写主角离开王城前的冲突。" {
+					t.Fatalf("Continue params = %#v, want expected payload", params)
+				}
+				return &chapterservice.ContinueResult{Chapter: continuedChapter, GenerationRecord: continuedRecord}, nil
+			},
+			rewrite: func(_ context.Context, params chapterservice.RewriteParams) (*chapterservice.RewriteResult, error) {
+				if params.ChapterID != chapterID || params.TargetText != "旧片段" || params.Instruction != "把这一段改得更紧张。" {
+					t.Fatalf("Rewrite params = %#v, want expected payload", params)
+				}
+				return &chapterservice.RewriteResult{Chapter: rewrittenChapter, GenerationRecord: rewrittenRecord}, nil
+			},
+		},
+		stubConversationUseCase{},
+	)
+
+	createRecorder := performJSONRequest(h, consts.MethodPost, "/api/v1/projects/"+projectID+"/chapters", `{"title":"第一章 王城初见","ordinal":1,"instruction":"写出主角第一次进入王城时的压迫感。"}`)
+	assertStatusCode(t, createRecorder.Code, consts.StatusCreated)
+	var created chapterGenerationResponse
+	decodeResponseBody(t, createRecorder, &created)
+	if created.Chapter.ID != chapterID || created.GenerationRecord.ID != generationID {
+		t.Fatalf("create response = %#v, want generated chapter and record", created)
+	}
+
+	listRecorder := performRequest(h, consts.MethodGet, "/api/v1/projects/"+projectID+"/chapters?limit=10&offset=0", "")
+	assertStatusCode(t, listRecorder.Code, consts.StatusOK)
+	var listed chapterListResponse
+	decodeResponseBody(t, listRecorder, &listed)
+	if len(listed.Chapters) != 1 || listed.Chapters[0].ID != chapterID {
+		t.Fatalf("listed chapters = %#v, want single chapter", listed.Chapters)
+	}
+
+	getRecorder := performRequest(h, consts.MethodGet, "/api/v1/chapters/"+chapterID, "")
+	assertStatusCode(t, getRecorder.Code, consts.StatusOK)
+	var got chapterResponse
+	decodeResponseBody(t, getRecorder, &got)
+	if got.ID != chapterID || got.Content != rewrittenChapter.Content {
+		t.Fatalf("get chapter = %#v, want rewritten chapter payload", got)
+	}
+
+	continueRecorder := performJSONRequest(h, consts.MethodPost, "/api/v1/chapters/"+chapterID+"/continue", `{"instruction":"继续写主角离开王城前的冲突。"}`)
+	assertStatusCode(t, continueRecorder.Code, consts.StatusOK)
+	var continued chapterGenerationResponse
+	decodeResponseBody(t, continueRecorder, &continued)
+	if continued.Chapter.Content != continuedChapter.Content || continued.GenerationRecord.Kind != generationdomain.KindChapterContinuation {
+		t.Fatalf("continue response = %#v, want continuation payload", continued)
+	}
+
+	rewriteRecorder := performJSONRequest(h, consts.MethodPost, "/api/v1/chapters/"+chapterID+"/rewrite", `{"target_text":"旧片段","instruction":"把这一段改得更紧张。"}`)
+	assertStatusCode(t, rewriteRecorder.Code, consts.StatusOK)
+	var rewritten chapterGenerationResponse
+	decodeResponseBody(t, rewriteRecorder, &rewritten)
+	if rewritten.Chapter.Content != rewrittenChapter.Content || rewritten.GenerationRecord.Kind != generationdomain.KindChapterRewrite {
+		t.Fatalf("rewrite response = %#v, want rewrite payload", rewritten)
+	}
+}
+
+func TestChapterRouteValidationAndErrorMappingIntegration(t *testing.T) {
+	const (
+		projectID = "11111111-1111-1111-1111-111111111111"
+		chapterID = "22222222-2222-2222-2222-222222222222"
+	)
+
+	t.Run("create malformed json returns 400", func(t *testing.T) {
+		h := newTestServerWithAllUseCases(stubProjectUseCase{}, stubAssetUseCase{}, stubChapterUseCase{}, stubConversationUseCase{})
+		recorder := performJSONRequest(h, consts.MethodPost, "/api/v1/projects/"+projectID+"/chapters", `{"title":`)
+		assertStatusCode(t, recorder.Code, consts.StatusBadRequest)
+		assertErrorResponse(t, recorder)
+	})
+
+	t.Run("continue malformed json returns 400", func(t *testing.T) {
+		h := newTestServerWithAllUseCases(stubProjectUseCase{}, stubAssetUseCase{}, stubChapterUseCase{}, stubConversationUseCase{})
+		recorder := performJSONRequest(h, consts.MethodPost, "/api/v1/chapters/"+chapterID+"/continue", `{"instruction":`)
+		assertStatusCode(t, recorder.Code, consts.StatusBadRequest)
+		assertErrorResponse(t, recorder)
+	})
+
+	t.Run("rewrite malformed json returns 400", func(t *testing.T) {
+		h := newTestServerWithAllUseCases(stubProjectUseCase{}, stubAssetUseCase{}, stubChapterUseCase{}, stubConversationUseCase{})
+		recorder := performJSONRequest(h, consts.MethodPost, "/api/v1/chapters/"+chapterID+"/rewrite", `{"target_text":`)
+		assertStatusCode(t, recorder.Code, consts.StatusBadRequest)
+		assertErrorResponse(t, recorder)
+	})
+
+	t.Run("list invalid query returns 400", func(t *testing.T) {
+		h := newTestServerWithAllUseCases(stubProjectUseCase{}, stubAssetUseCase{}, stubChapterUseCase{}, stubConversationUseCase{})
+		recorder := performRequest(h, consts.MethodGet, "/api/v1/projects/"+projectID+"/chapters?limit=abc", "")
+		assertStatusCode(t, recorder.Code, consts.StatusBadRequest)
+		assertErrorResponse(t, recorder)
+	})
+
+	t.Run("create invalid input maps to 400", func(t *testing.T) {
+		h := newTestServerWithAllUseCases(
+			stubProjectUseCase{},
+			stubAssetUseCase{},
+			stubChapterUseCase{
+				generate: func(context.Context, chapterservice.GenerateParams) (*chapterservice.GenerateResult, error) {
+					return nil, appservice.WrapInvalidInput(errors.New("ordinal must be greater than 0"))
+				},
+			},
+			stubConversationUseCase{},
+		)
+		recorder := performJSONRequest(h, consts.MethodPost, "/api/v1/projects/"+projectID+"/chapters", `{"title":"第一章","ordinal":0,"instruction":"开始写。"}`)
+		assertStatusCode(t, recorder.Code, consts.StatusBadRequest)
+		assertErrorContains(t, recorder, "ordinal must be greater than 0")
+	})
+
+	t.Run("get not found maps to 404", func(t *testing.T) {
+		h := newTestServerWithAllUseCases(
+			stubProjectUseCase{},
+			stubAssetUseCase{},
+			stubChapterUseCase{
+				getByID: func(context.Context, string) (*chapterdomain.Chapter, error) {
+					return nil, appservice.WrapNotFound(errors.New("missing chapter"))
+				},
+			},
+			stubConversationUseCase{},
+		)
+		recorder := performRequest(h, consts.MethodGet, "/api/v1/chapters/"+chapterID, "")
+		assertStatusCode(t, recorder.Code, consts.StatusNotFound)
+		assertErrorContains(t, recorder, "missing chapter")
+	})
+
+	t.Run("continue unexpected error maps to 500", func(t *testing.T) {
+		h := newTestServerWithAllUseCases(
+			stubProjectUseCase{},
+			stubAssetUseCase{},
+			stubChapterUseCase{
+				continueFn: func(context.Context, chapterservice.ContinueParams) (*chapterservice.ContinueResult, error) {
+					return nil, errors.New("llm backend offline")
+				},
+			},
+			stubConversationUseCase{},
+		)
+		recorder := performRequest(h, consts.MethodPost, "/api/v1/chapters/"+chapterID+"/continue", `{"instruction":"继续写。"}`)
+		assertStatusCode(t, recorder.Code, consts.StatusInternalServerError)
+		assertErrorMessage(t, recorder, "internal server error")
+	})
+}
+
 func newTestServer() *server.Hertz {
 	projectRepo := memory.NewProjectRepository()
 	assetRepo := memory.NewAssetRepository()
+	conversationRepo := memory.NewConversationRepository()
 	projectUseCase := projectservice.NewUseCase(projectservice.Dependencies{Projects: projectRepo})
 	assetUseCase := assetservice.NewUseCase(assetservice.Dependencies{
 		Assets:   assetRepo,
 		Projects: projectRepo,
 	})
+	conversationUseCase := stubConversationUseCase{}
+	_ = conversationRepo
 
-	return newTestServerWithUseCases(projectUseCase, assetUseCase)
+	return newTestServerWithUseCases(projectUseCase, assetUseCase, conversationUseCase)
 }
 
-func newTestServerWithUseCases(projectUseCase projectservice.UseCase, assetUseCase assetservice.UseCase) *server.Hertz {
+func newTestServerWithUseCases(projectUseCase projectservice.UseCase, assetUseCase assetservice.UseCase, conversationUseCase conversationservice.UseCase) *server.Hertz {
+	return newTestServerWithAllUseCases(projectUseCase, assetUseCase, stubChapterUseCase{}, conversationUseCase)
+}
+
+func newTestServerWithAllUseCases(projectUseCase projectservice.UseCase, assetUseCase assetservice.UseCase, chapterUseCase chapterservice.UseCase, conversationUseCase conversationservice.UseCase) *server.Hertz {
 	testConfig := config.ServerConfig{
 		Host:                "127.0.0.1",
 		Port:                18080,
@@ -279,8 +834,10 @@ func newTestServerWithUseCases(projectUseCase projectservice.UseCase, assetUseCa
 	}
 
 	return httpinfra.NewServer(testConfig, httpinfra.Dependencies{
-		Projects: projectUseCase,
-		Assets:   assetUseCase,
+		Projects:      projectUseCase,
+		Assets:        assetUseCase,
+		Chapters:      chapterUseCase,
+		Conversations: conversationUseCase,
 	})
 }
 
@@ -448,4 +1005,106 @@ func (s stubAssetUseCase) Delete(ctx context.Context, id string) error {
 		return s.delete(ctx, id)
 	}
 	return errors.New("unexpected Delete call")
+}
+
+type stubChapterUseCase struct {
+	create        func(context.Context, *chapterdomain.Chapter) error
+	getByID       func(context.Context, string) (*chapterdomain.Chapter, error)
+	listByProject func(context.Context, chapterdomain.ListByProjectParams) ([]*chapterdomain.Chapter, error)
+	update        func(context.Context, *chapterdomain.Chapter) error
+	generate      func(context.Context, chapterservice.GenerateParams) (*chapterservice.GenerateResult, error)
+	continueFn    func(context.Context, chapterservice.ContinueParams) (*chapterservice.ContinueResult, error)
+	rewrite       func(context.Context, chapterservice.RewriteParams) (*chapterservice.RewriteResult, error)
+}
+
+func (s stubChapterUseCase) Create(ctx context.Context, chapter *chapterdomain.Chapter) error {
+	if s.create != nil {
+		return s.create(ctx, chapter)
+	}
+	return errors.New("unexpected Create call")
+}
+
+func (s stubChapterUseCase) GetByID(ctx context.Context, id string) (*chapterdomain.Chapter, error) {
+	if s.getByID != nil {
+		return s.getByID(ctx, id)
+	}
+	return nil, errors.New("unexpected GetByID call")
+}
+
+func (s stubChapterUseCase) ListByProject(ctx context.Context, params chapterdomain.ListByProjectParams) ([]*chapterdomain.Chapter, error) {
+	if s.listByProject != nil {
+		return s.listByProject(ctx, params)
+	}
+	return nil, errors.New("unexpected ListByProject call")
+}
+
+func (s stubChapterUseCase) Update(ctx context.Context, chapter *chapterdomain.Chapter) error {
+	if s.update != nil {
+		return s.update(ctx, chapter)
+	}
+	return errors.New("unexpected Update call")
+}
+
+func (s stubChapterUseCase) Generate(ctx context.Context, params chapterservice.GenerateParams) (*chapterservice.GenerateResult, error) {
+	if s.generate != nil {
+		return s.generate(ctx, params)
+	}
+	return nil, errors.New("unexpected Generate call")
+}
+
+func (s stubChapterUseCase) Continue(ctx context.Context, params chapterservice.ContinueParams) (*chapterservice.ContinueResult, error) {
+	if s.continueFn != nil {
+		return s.continueFn(ctx, params)
+	}
+	return nil, errors.New("unexpected Continue call")
+}
+
+func (s stubChapterUseCase) Rewrite(ctx context.Context, params chapterservice.RewriteParams) (*chapterservice.RewriteResult, error) {
+	if s.rewrite != nil {
+		return s.rewrite(ctx, params)
+	}
+	return nil, errors.New("unexpected Rewrite call")
+}
+
+type stubConversationUseCase struct {
+	start   func(context.Context, conversationservice.StartParams) (*conversationdomain.Conversation, error)
+	reply   func(context.Context, conversationservice.ReplyParams) (*conversationdomain.Conversation, error)
+	confirm func(context.Context, string) (*conversationservice.ConfirmResult, error)
+	getByID func(context.Context, string) (*conversationdomain.Conversation, error)
+	list    func(context.Context, conversationservice.ListParams) ([]*conversationdomain.Conversation, error)
+}
+
+func (s stubConversationUseCase) Start(ctx context.Context, params conversationservice.StartParams) (*conversationdomain.Conversation, error) {
+	if s.start != nil {
+		return s.start(ctx, params)
+	}
+	return nil, errors.New("unexpected Start call")
+}
+
+func (s stubConversationUseCase) Reply(ctx context.Context, params conversationservice.ReplyParams) (*conversationdomain.Conversation, error) {
+	if s.reply != nil {
+		return s.reply(ctx, params)
+	}
+	return nil, errors.New("unexpected Reply call")
+}
+
+func (s stubConversationUseCase) Confirm(ctx context.Context, id string) (*conversationservice.ConfirmResult, error) {
+	if s.confirm != nil {
+		return s.confirm(ctx, id)
+	}
+	return nil, errors.New("unexpected Confirm call")
+}
+
+func (s stubConversationUseCase) GetByID(ctx context.Context, id string) (*conversationdomain.Conversation, error) {
+	if s.getByID != nil {
+		return s.getByID(ctx, id)
+	}
+	return nil, errors.New("unexpected GetByID call")
+}
+
+func (s stubConversationUseCase) List(ctx context.Context, params conversationservice.ListParams) ([]*conversationdomain.Conversation, error) {
+	if s.list != nil {
+		return s.list(ctx, params)
+	}
+	return nil, errors.New("unexpected List call")
 }

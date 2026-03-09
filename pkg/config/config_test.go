@@ -7,8 +7,12 @@ import (
 
 func validPromptConfig() PromptConfig {
 	return PromptConfig{
-		"asset_generation":   "asset_generation.yaml",
-		"chapter_generation": "chapter_generation.yaml",
+		"asset_generation":     "asset_generation.yaml",
+		"chapter_generation":   "chapter_generation.yaml",
+		"chapter_continuation": "chapter_continuation.yaml",
+		"chapter_rewrite":      "chapter_rewrite.yaml",
+		"project_refinement":   "project_refinement.yaml",
+		"asset_refinement":     "asset_refinement.yaml",
 	}
 }
 
@@ -75,10 +79,14 @@ func TestPromptConfigValidate(t *testing.T) {
 		wantErr string
 	}{
 		{name: "valid", cfg: validPromptConfig()},
-		{name: "missing asset prompt", cfg: PromptConfig{"chapter_generation": "chapter_generation.yaml"}, wantErr: "asset_generation must not be empty"},
-		{name: "missing chapter prompt", cfg: PromptConfig{"asset_generation": "asset_generation.yaml"}, wantErr: "chapter_generation must not be empty"},
-		{name: "unsupported kind", cfg: PromptConfig{"asset_generation": "asset_generation.yaml", "chapter_generation": "chapter_generation.yaml", "unsupported": "unsupported.yaml"}, wantErr: "\"unsupported\" is not a supported prompt kind"},
-		{name: "empty filename", cfg: PromptConfig{"asset_generation": "asset_generation.yaml", "chapter_generation": ""}, wantErr: "chapter_generation must not be empty"},
+		{name: "missing asset generation prompt", cfg: PromptConfig{"chapter_generation": "chapter_generation.yaml", "chapter_continuation": "chapter_continuation.yaml", "chapter_rewrite": "chapter_rewrite.yaml", "project_refinement": "project_refinement.yaml", "asset_refinement": "asset_refinement.yaml"}, wantErr: "asset_generation must not be empty"},
+		{name: "missing chapter generation prompt", cfg: PromptConfig{"asset_generation": "asset_generation.yaml", "chapter_continuation": "chapter_continuation.yaml", "chapter_rewrite": "chapter_rewrite.yaml", "project_refinement": "project_refinement.yaml", "asset_refinement": "asset_refinement.yaml"}, wantErr: "chapter_generation must not be empty"},
+		{name: "missing chapter continuation prompt", cfg: PromptConfig{"asset_generation": "asset_generation.yaml", "chapter_generation": "chapter_generation.yaml", "chapter_rewrite": "chapter_rewrite.yaml", "project_refinement": "project_refinement.yaml", "asset_refinement": "asset_refinement.yaml"}, wantErr: "chapter_continuation must not be empty"},
+		{name: "missing chapter rewrite prompt", cfg: PromptConfig{"asset_generation": "asset_generation.yaml", "chapter_generation": "chapter_generation.yaml", "chapter_continuation": "chapter_continuation.yaml", "project_refinement": "project_refinement.yaml", "asset_refinement": "asset_refinement.yaml"}, wantErr: "chapter_rewrite must not be empty"},
+		{name: "missing project refinement prompt", cfg: PromptConfig{"asset_generation": "asset_generation.yaml", "chapter_generation": "chapter_generation.yaml", "chapter_continuation": "chapter_continuation.yaml", "chapter_rewrite": "chapter_rewrite.yaml", "asset_refinement": "asset_refinement.yaml"}, wantErr: "project_refinement must not be empty"},
+		{name: "missing asset refinement prompt", cfg: PromptConfig{"asset_generation": "asset_generation.yaml", "chapter_generation": "chapter_generation.yaml", "chapter_continuation": "chapter_continuation.yaml", "chapter_rewrite": "chapter_rewrite.yaml", "project_refinement": "project_refinement.yaml"}, wantErr: "asset_refinement must not be empty"},
+		{name: "unsupported kind", cfg: PromptConfig{"asset_generation": "asset_generation.yaml", "chapter_generation": "chapter_generation.yaml", "chapter_continuation": "chapter_continuation.yaml", "chapter_rewrite": "chapter_rewrite.yaml", "project_refinement": "project_refinement.yaml", "asset_refinement": "asset_refinement.yaml", "unsupported": "unsupported.yaml"}, wantErr: "\"unsupported\" is not a supported prompt kind"},
+		{name: "empty filename", cfg: PromptConfig{"asset_generation": "asset_generation.yaml", "chapter_generation": "chapter_generation.yaml", "chapter_continuation": "chapter_continuation.yaml", "chapter_rewrite": "chapter_rewrite.yaml", "project_refinement": "project_refinement.yaml", "asset_refinement": ""}, wantErr: "asset_refinement must not be empty"},
 	}
 
 	for _, tt := range tests {

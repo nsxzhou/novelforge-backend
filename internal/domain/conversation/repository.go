@@ -28,6 +28,7 @@ type ListByTargetParams struct {
 type ConversationRepository interface {
 	Create(ctx context.Context, conversation *Conversation) error
 	GetByID(ctx context.Context, id string) (*Conversation, error)
+	Update(ctx context.Context, conversation *Conversation) error
 	AppendMessage(ctx context.Context, params AppendMessageParams) error
 	ListByProject(ctx context.Context, params ListByProjectParams) ([]*Conversation, error)
 	ListByTarget(ctx context.Context, params ListByTargetParams) ([]*Conversation, error)

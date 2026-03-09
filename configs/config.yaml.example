@@ -21,3 +21,7 @@ llm:
   prompts:
     asset_generation: "asset_generation.yaml"
     chapter_generation: "chapter_generation.yaml"
+    chapter_continuation: "chapter_continuation.yaml"
+    chapter_rewrite: "chapter_rewrite.yaml"
+    project_refinement: "project_refinement.yaml"
+    asset_refinement: "asset_refinement.yaml"

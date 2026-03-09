@@ -39,6 +39,10 @@ func validLLMConfig(apiKeyEnv string) config.LLMConfig {
 		Prompts: config.PromptConfig{
 			generation.KindAssetGeneration:   "asset_generation.yaml",
 			generation.KindChapterGeneration: "chapter_generation.yaml",
+			generation.KindChapterContinuation: "chapter_continuation.yaml",
+			generation.KindChapterRewrite:      "chapter_rewrite.yaml",
+			"project_refinement":             "project_refinement.yaml",
+			"asset_refinement":               "asset_refinement.yaml",
 		},
 	}
 }

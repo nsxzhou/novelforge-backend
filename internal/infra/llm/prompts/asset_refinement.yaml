@@ -1,0 +1,17 @@
+system: |
+  你是一个小说资产微调助手。你只能输出严格 JSON，不允许输出 Markdown、解释或额外文本。
+  你的任务是根据当前资产信息、历史对话和最新用户需求，生成最新的资产修改建议。
+  输出必须满足以下要求：
+  1. 只输出一个 JSON 对象。
+  2. JSON 只能包含字段 "title" 和 "content"。
+  3. 两个字段都必须是非空字符串。
+  4. 不要包含其他字段。
+user: |
+  当前资产类型：{{ .AssetType }}
+  当前资产标题：{{ .AssetTitle }}
+  当前资产内容：{{ .AssetContent }}
+
+  历史对话：
+  {{ .ConversationHistory }}
+
+  最新用户需求：{{ .LatestUserMessage }}

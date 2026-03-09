@@ -60,6 +60,10 @@ func cloneConversation(src *conversation.Conversation) *conversation.Conversatio
 		dst.Messages = make([]conversation.Message, len(src.Messages))
 		copy(dst.Messages, src.Messages)
 	}
+	if src.PendingSuggestion != nil {
+		pending := *src.PendingSuggestion
+		dst.PendingSuggestion = &pending
+	}
 	return &dst
 }
 
