@@ -12,22 +12,27 @@
 - 健康检查接口：
   - `GET /healthz`
   - `GET /readyz`
-- 已接入项目、资产与对话微调 API：
+- 已接入项目、资产、章节与对话微调 API：
   - `POST /api/v1/projects`
   - `GET /api/v1/projects`
   - `GET /api/v1/projects/:projectID`
   - `PUT /api/v1/projects/:projectID`
   - `POST /api/v1/projects/:projectID/assets`
   - `GET /api/v1/projects/:projectID/assets`
+  - `POST /api/v1/projects/:projectID/chapters`
+  - `GET /api/v1/projects/:projectID/chapters`
+  - `POST /api/v1/projects/:projectID/conversations`
+  - `GET /api/v1/projects/:projectID/conversations`
   - `GET /api/v1/assets/:assetID`
   - `PUT /api/v1/assets/:assetID`
   - `DELETE /api/v1/assets/:assetID`
-  - `POST /api/v1/projects/:projectID/conversations`
-  - `GET /api/v1/projects/:projectID/conversations`
+  - `GET /api/v1/chapters/:chapterID`
+  - `POST /api/v1/chapters/:chapterID/continue`
+  - `POST /api/v1/chapters/:chapterID/rewrite`
   - `GET /api/v1/conversations/:conversationID`
   - `POST /api/v1/conversations/:conversationID/messages`
   - `POST /api/v1/conversations/:conversationID/confirm`
-- 已接入 OpenAI 兼容 LLM 客户端装配、Prompt 模板注册表，以及 Project / Asset 对话驱动微调链路（建议生成 -> 显式确认 -> 写回）
+- 已接入 OpenAI 兼容 LLM 客户端装配、Prompt 模板注册表，以及 Project / Asset 对话驱动微调链路（建议生成 -> 显式确认 -> 写回）和章节生成主链路（生成 / 续写 / 局部重写）
 
 ### 领域模型层 (`internal/domain`)
 
@@ -51,12 +56,13 @@ V1 全部 6 个领域聚合已落地，每个聚合包含实体定义（`model.g
 
 ### 服务用例层 (`internal/service`)
 
-当前已提供 Project / Asset / Conversation 的应用用例实现，其余领域仍以接口与依赖声明为主：
+当前已提供 Project / Asset / Conversation / Chapter 的应用用例实现；Metric 仍以接口与依赖声明为主：
 
 - `service/project`：项目创建 / 列表 / 查询 / 更新
 - `service/asset`：资产创建 / 列表 / 按类型过滤 / 查询 / 更新 / 删除
 - `service/conversation`：对话发起 / 继续 / 查询 / 按 project/target 列表 / 显式确认写回 Project / Asset
-- `service/chapter`、`service/generation`、`service/metric`：当前仍以接口与依赖声明为主
+- `service/chapter`：章节生成 / 列表 / 查询 / 续写 / 局部重写，并为章节生成流创建和更新 `GenerationRecord`
+- `service/metric`：当前仍以接口与依赖声明为主，尚未接入业务采集流程
 
 ## 本地开发（默认 PostgreSQL）
 
@@ -119,6 +125,8 @@ llm:
   prompts:
     asset_generation: "asset_generation.yaml"
     chapter_generation: "chapter_generation.yaml"
+    chapter_continuation: "chapter_continuation.yaml"
+    chapter_rewrite: "chapter_rewrite.yaml"
     project_refinement: "project_refinement.yaml"
     asset_refinement: "asset_refinement.yaml"
 ```
@@ -127,6 +135,8 @@ Prompt 模板文件位于：
 
 - `internal/infra/llm/prompts/asset_generation.yaml`
 - `internal/infra/llm/prompts/chapter_generation.yaml`
+- `internal/infra/llm/prompts/chapter_continuation.yaml`
+- `internal/infra/llm/prompts/chapter_rewrite.yaml`
 - `internal/infra/llm/prompts/project_refinement.yaml`
 - `internal/infra/llm/prompts/asset_refinement.yaml`
 
@@ -135,7 +145,7 @@ Prompt 模板文件位于：
 - `system`
 - `user`
 
-Prompt 模板内容通过 `go:embed` 编译进二进制。服务启动时会按配置预加载并校验模板文件语法；修改模板文件后需要重新构建并重新部署服务。当前 `project_refinement` / `asset_refinement` 已接入对话微调链路；章节生成相关模板与 LLM 基础设施已就绪，但尚未接入具体章节生成业务。
+Prompt 模板内容通过 `go:embed` 编译进二进制。服务启动时会按配置预加载并校验模板文件语法；修改模板文件后需要重新构建并重新部署服务。当前 `project_refinement` / `asset_refinement` 已接入 Project / Asset 对话微调链路；`chapter_generation` / `chapter_continuation` / `chapter_rewrite` 已接入章节生成、续写与局部重写业务。
 
 数据库 schema 迁移文件位于：
 
@@ -165,7 +175,7 @@ go test ./...
 
 ## 当前刻意保留的边界
 
-- 项目 / 资产 CRUD 与 Project / Asset 对话微调链路已完成，但章节生成、当前稿确认、指标采集等后续业务接口尚未实现
-- 章节生成相关 LLM / Prompt 基础设施已就绪，但尚未接入 `service/chapter`、`service/generation` 或对应 handler / route
+- 项目 / 资产 CRUD、Project / Asset 对话微调，以及章节生成 / 续写 / 局部重写链路已完成；章节生成流会创建并持久化 `GenerationRecord`
+- `Chapter` 模型与 HTTP 响应中已包含 `current_draft_id`、`current_draft_confirmed_at`、`current_draft_confirmed_by` 字段，但显式的“确认当前稿”业务流与 API 尚未实现
 - 直接通过 `cmd/server` 启动 `postgres` 模式服务时不会自动执行 migration；如需自动执行可使用 `scripts/run-local.sh`
 - `memory` provider 仍然保留，但目标是用于测试而不是默认运行态持久化
