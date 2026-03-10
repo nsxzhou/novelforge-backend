@@ -53,6 +53,9 @@ func (projectCreateConflictRepo) List(context.Context, projectdomain.ListParams)
 func (projectCreateConflictRepo) Update(context.Context, *projectdomain.Project) error {
 	return nil
 }
+func (projectCreateConflictRepo) UpdateIfUnchanged(context.Context, *projectdomain.Project, time.Time) (bool, error) {
+	return false, nil
+}
 
 type projectListCaptureRepo struct {
 	params projectdomain.ListParams
@@ -70,6 +73,9 @@ func (r *projectListCaptureRepo) List(_ context.Context, params projectdomain.Li
 }
 func (r *projectListCaptureRepo) Update(context.Context, *projectdomain.Project) error {
 	return nil
+}
+func (r *projectListCaptureRepo) UpdateIfUnchanged(context.Context, *projectdomain.Project, time.Time) (bool, error) {
+	return false, nil
 }
 
 func TestCreateDefaultsAndTrimsProject(t *testing.T) {

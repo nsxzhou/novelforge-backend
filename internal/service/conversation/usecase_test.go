@@ -300,8 +300,12 @@ func TestUseCaseConfirmProjectAppliesSuggestionAndClearsPending(t *testing.T) {
 	if result.Conversation.PendingSuggestion != nil {
 		t.Fatalf("PendingSuggestion = %#v, want nil", result.Conversation.PendingSuggestion)
 	}
-	if got := result.Conversation.Messages[len(result.Conversation.Messages)-1]; got.Role != conversationdomain.MessageRoleSystem {
-		t.Fatalf("last message role = %q, want system", got.Role)
+	lastMessage := result.Conversation.Messages[len(result.Conversation.Messages)-1]
+	if lastMessage.Role != conversationdomain.MessageRoleSystem {
+		t.Fatalf("last message role = %q, want system", lastMessage.Role)
+	}
+	if lastMessage.Content != "已确认最新项目建议并写回项目。" {
+		t.Fatalf("last message content = %q, want %q", lastMessage.Content, "已确认最新项目建议并写回项目。")
 	}
 	storedProject, err := projectRepo.GetByID(context.Background(), project.ID)
 	if err != nil {
@@ -565,8 +569,11 @@ func TestUseCaseConfirmAssetAppliesSuggestionAndClearsPending(t *testing.T) {
 		t.Fatalf("PendingSuggestion = %#v, want nil", result.Conversation.PendingSuggestion)
 	}
 	lastMessage := result.Conversation.Messages[len(result.Conversation.Messages)-1]
-	if lastMessage.Role != conversationdomain.MessageRoleSystem || !strings.Contains(lastMessage.Content, "asset") {
-		t.Fatalf("last message = %#v, want system confirm message for asset", lastMessage)
+	if lastMessage.Role != conversationdomain.MessageRoleSystem {
+		t.Fatalf("last message role = %q, want system", lastMessage.Role)
+	}
+	if lastMessage.Content != "已确认最新资产建议并写回资产。" {
+		t.Fatalf("last message content = %q, want %q", lastMessage.Content, "已确认最新资产建议并写回资产。")
 	}
 
 	storedAsset, err := assetRepo.GetByID(context.Background(), asset.ID)
@@ -658,6 +665,173 @@ func TestUseCaseConfirmRejectsInvalidAssetConversation(t *testing.T) {
 	if _, err := otherUseCase.Confirm(context.Background(), otherConversation.ID); !errors.Is(err, appservice.ErrInvalidInput) {
 		t.Fatalf("Confirm(asset mismatch) error = %v, want invalid input", err)
 	}
+}
+
+func TestUseCaseConfirmReturnsConflictWhenProjectUpdatedConcurrently(t *testing.T) {
+	baseProjectRepo := memory.NewProjectRepository()
+	assetRepo := memory.NewAssetRepository()
+	conversationRepo := memory.NewConversationRepository()
+	project := createProjectEntity(t, baseProjectRepo)
+	baseTime := time.Date(2026, 3, 9, 15, 0, 0, 0, time.UTC)
+
+	conversationEntity := &conversationdomain.Conversation{
+		ID:                "77777777-7777-7777-7777-777777777777",
+		ProjectID:         project.ID,
+		TargetType:        conversationdomain.TargetTypeProject,
+		TargetID:          project.ID,
+		PendingSuggestion: &conversationdomain.PendingSuggestion{Title: "新标题", Summary: "新简介"},
+		CreatedAt:         baseTime,
+		UpdatedAt:         baseTime.Add(time.Minute),
+	}
+	if err := conversationRepo.Create(context.Background(), conversationEntity); err != nil {
+		t.Fatalf("Create(conversation) error = %v", err)
+	}
+
+	useCase := NewUseCase(Dependencies{
+		Conversations: conversationRepo,
+		Projects: conflictProjectRepository{
+			ProjectRepository: baseProjectRepo,
+			forceConflict:     true,
+		},
+		Assets: assetRepo,
+	})
+
+	_, err := useCase.Confirm(context.Background(), conversationEntity.ID)
+	if !errors.Is(err, appservice.ErrConflict) {
+		t.Fatalf("Confirm() error = %v, want conflict", err)
+	}
+	if !strings.Contains(err.Error(), "project was modified during confirmation") {
+		t.Fatalf("Confirm() error = %v, want project conflict message", err)
+	}
+
+	storedConversation, getErr := conversationRepo.GetByID(context.Background(), conversationEntity.ID)
+	if getErr != nil {
+		t.Fatalf("GetByID(conversation) error = %v", getErr)
+	}
+	if storedConversation.PendingSuggestion == nil {
+		t.Fatal("PendingSuggestion = nil, want unchanged pending suggestion")
+	}
+}
+
+func TestUseCaseConfirmReturnsConflictWhenAssetUpdatedConcurrently(t *testing.T) {
+	projectRepo := memory.NewProjectRepository()
+	baseAssetRepo := memory.NewAssetRepository()
+	conversationRepo := memory.NewConversationRepository()
+	project := createProjectEntity(t, projectRepo)
+	asset := createAssetEntity(t, baseAssetRepo, project.ID)
+	baseTime := time.Date(2026, 3, 9, 16, 0, 0, 0, time.UTC)
+
+	conversationEntity := &conversationdomain.Conversation{
+		ID:                "88888888-8888-8888-8888-888888888888",
+		ProjectID:         project.ID,
+		TargetType:        conversationdomain.TargetTypeAsset,
+		TargetID:          asset.ID,
+		PendingSuggestion: &conversationdomain.PendingSuggestion{Title: "新资产标题", Content: "新资产内容"},
+		CreatedAt:         baseTime,
+		UpdatedAt:         baseTime.Add(time.Minute),
+	}
+	if err := conversationRepo.Create(context.Background(), conversationEntity); err != nil {
+		t.Fatalf("Create(conversation) error = %v", err)
+	}
+
+	useCase := NewUseCase(Dependencies{
+		Conversations: conversationRepo,
+		Projects:      projectRepo,
+		Assets: conflictAssetRepository{
+			AssetRepository: baseAssetRepo,
+			forceConflict:   true,
+		},
+	})
+
+	_, err := useCase.Confirm(context.Background(), conversationEntity.ID)
+	if !errors.Is(err, appservice.ErrConflict) {
+		t.Fatalf("Confirm() error = %v, want conflict", err)
+	}
+	if !strings.Contains(err.Error(), "asset was modified during confirmation") {
+		t.Fatalf("Confirm() error = %v, want asset conflict message", err)
+	}
+
+	storedConversation, getErr := conversationRepo.GetByID(context.Background(), conversationEntity.ID)
+	if getErr != nil {
+		t.Fatalf("GetByID(conversation) error = %v", getErr)
+	}
+	if storedConversation.PendingSuggestion == nil {
+		t.Fatal("PendingSuggestion = nil, want unchanged pending suggestion")
+	}
+}
+
+func TestUseCaseConfirmReturnsConflictWhenConversationUpdatedConcurrently(t *testing.T) {
+	projectRepo := memory.NewProjectRepository()
+	assetRepo := memory.NewAssetRepository()
+	baseConversationRepo := memory.NewConversationRepository()
+	project := createProjectEntity(t, projectRepo)
+	baseTime := time.Date(2026, 3, 9, 17, 0, 0, 0, time.UTC)
+
+	conversationEntity := &conversationdomain.Conversation{
+		ID:                "99999999-9999-9999-9999-999999999999",
+		ProjectID:         project.ID,
+		TargetType:        conversationdomain.TargetTypeProject,
+		TargetID:          project.ID,
+		PendingSuggestion: &conversationdomain.PendingSuggestion{Title: "最终标题", Summary: "最终简介"},
+		CreatedAt:         baseTime,
+		UpdatedAt:         baseTime.Add(time.Minute),
+	}
+	if err := baseConversationRepo.Create(context.Background(), conversationEntity); err != nil {
+		t.Fatalf("Create(conversation) error = %v", err)
+	}
+
+	useCase := NewUseCase(Dependencies{
+		Conversations: conflictConversationRepository{
+			ConversationRepository: baseConversationRepo,
+			forceConflict:          true,
+		},
+		Projects: projectRepo,
+		Assets:   assetRepo,
+	})
+
+	_, err := useCase.Confirm(context.Background(), conversationEntity.ID)
+	if !errors.Is(err, appservice.ErrConflict) {
+		t.Fatalf("Confirm() error = %v, want conflict", err)
+	}
+	if !strings.Contains(err.Error(), "conversation was modified during confirmation") {
+		t.Fatalf("Confirm() error = %v, want conversation conflict message", err)
+	}
+}
+
+type conflictProjectRepository struct {
+	projectdomain.ProjectRepository
+	forceConflict bool
+}
+
+func (r conflictProjectRepository) UpdateIfUnchanged(ctx context.Context, project *projectdomain.Project, expectedUpdatedAt time.Time) (bool, error) {
+	if r.forceConflict {
+		return false, nil
+	}
+	return r.ProjectRepository.UpdateIfUnchanged(ctx, project, expectedUpdatedAt)
+}
+
+type conflictAssetRepository struct {
+	assetdomain.AssetRepository
+	forceConflict bool
+}
+
+func (r conflictAssetRepository) UpdateIfUnchanged(ctx context.Context, asset *assetdomain.Asset, expectedUpdatedAt time.Time) (bool, error) {
+	if r.forceConflict {
+		return false, nil
+	}
+	return r.AssetRepository.UpdateIfUnchanged(ctx, asset, expectedUpdatedAt)
+}
+
+type conflictConversationRepository struct {
+	conversationdomain.ConversationRepository
+	forceConflict bool
+}
+
+func (r conflictConversationRepository) UpdateIfUnchanged(ctx context.Context, conversation *conversationdomain.Conversation, expectedUpdatedAt time.Time) (bool, error) {
+	if r.forceConflict {
+		return false, nil
+	}
+	return r.ConversationRepository.UpdateIfUnchanged(ctx, conversation, expectedUpdatedAt)
 }
 
 var _ llm.Client = (*stubLLMClient)(nil)

@@ -200,7 +200,8 @@ func (u *useCase) Confirm(ctx context.Context, conversationID string) (*ConfirmR
 	}
 
 	result := &ConfirmResult{Conversation: conversation}
-	conversationUpdatedAt := nonZeroUpdatedAt(conversation.UpdatedAt, time.Now().UTC())
+	expectedConversationUpdatedAt := nonZeroUpdatedAt(conversation.CreatedAt, conversation.UpdatedAt)
+	conversationUpdatedAt := nonZeroUpdatedAt(expectedConversationUpdatedAt, time.Now().UTC())
 
 	switch conversation.TargetType {
 	case conversationdomain.TargetTypeProject:
@@ -210,21 +211,29 @@ func (u *useCase) Confirm(ctx context.Context, conversationID string) (*ConfirmR
 			u.trackOperationFailed(ctx, conversation.ProjectID, conversation.TargetType, "confirm", startedAt, 0, translatedErr)
 			return nil, translatedErr
 		}
-		entityUpdatedAt := nonZeroUpdatedAt(projectEntity.UpdatedAt, conversationUpdatedAt)
-		projectEntity.Title = strings.TrimSpace(conversation.PendingSuggestion.Title)
-		projectEntity.Summary = strings.TrimSpace(conversation.PendingSuggestion.Summary)
-		projectEntity.UpdatedAt = entityUpdatedAt
-		if err := projectEntity.Validate(); err != nil {
+		expectedProjectUpdatedAt := nonZeroUpdatedAt(projectEntity.CreatedAt, projectEntity.UpdatedAt)
+		entityUpdatedAt := nonZeroUpdatedAt(expectedProjectUpdatedAt, conversationUpdatedAt)
+		updatedProject := *projectEntity
+		updatedProject.Title = strings.TrimSpace(conversation.PendingSuggestion.Title)
+		updatedProject.Summary = strings.TrimSpace(conversation.PendingSuggestion.Summary)
+		updatedProject.UpdatedAt = entityUpdatedAt
+		if err := updatedProject.Validate(); err != nil {
 			wrappedErr := appservice.WrapInvalidInput(err)
 			u.trackOperationFailed(ctx, conversation.ProjectID, conversation.TargetType, "confirm", startedAt, 0, wrappedErr)
 			return nil, wrappedErr
 		}
-		if err := u.projects.Update(ctx, projectEntity); err != nil {
-			translatedErr := appservice.TranslateStorageError(err)
+		updatedOK, updateErr := u.projects.UpdateIfUnchanged(ctx, &updatedProject, expectedProjectUpdatedAt)
+		if updateErr != nil {
+			translatedErr := appservice.TranslateStorageError(updateErr)
 			u.trackOperationFailed(ctx, conversation.ProjectID, conversation.TargetType, "confirm", startedAt, 0, translatedErr)
 			return nil, translatedErr
 		}
-		result.Project = projectEntity
+		if !updatedOK {
+			conflictErr := appservice.WrapConflict(fmt.Errorf("project was modified during confirmation; please retry"))
+			u.trackOperationFailed(ctx, conversation.ProjectID, conversation.TargetType, "confirm", startedAt, 0, conflictErr)
+			return nil, conflictErr
+		}
+		result.Project = &updatedProject
 	case conversationdomain.TargetTypeAsset:
 		assetEntity, loadErr := u.assets.GetByID(ctx, conversation.TargetID)
 		if loadErr != nil {
@@ -237,40 +246,55 @@ func (u *useCase) Confirm(ctx context.Context, conversationID string) (*ConfirmR
 			u.trackOperationFailed(ctx, conversation.ProjectID, conversation.TargetType, "confirm", startedAt, 0, err)
 			return nil, err
 		}
-		entityUpdatedAt := nonZeroUpdatedAt(assetEntity.UpdatedAt, conversationUpdatedAt)
-		assetEntity.Title = strings.TrimSpace(conversation.PendingSuggestion.Title)
-		assetEntity.Content = strings.TrimSpace(conversation.PendingSuggestion.Content)
-		assetEntity.UpdatedAt = entityUpdatedAt
-		if err := assetEntity.Validate(); err != nil {
+		expectedAssetUpdatedAt := nonZeroUpdatedAt(assetEntity.CreatedAt, assetEntity.UpdatedAt)
+		entityUpdatedAt := nonZeroUpdatedAt(expectedAssetUpdatedAt, conversationUpdatedAt)
+		updatedAsset := *assetEntity
+		updatedAsset.Title = strings.TrimSpace(conversation.PendingSuggestion.Title)
+		updatedAsset.Content = strings.TrimSpace(conversation.PendingSuggestion.Content)
+		updatedAsset.UpdatedAt = entityUpdatedAt
+		if err := updatedAsset.Validate(); err != nil {
 			wrappedErr := appservice.WrapInvalidInput(err)
 			u.trackOperationFailed(ctx, conversation.ProjectID, conversation.TargetType, "confirm", startedAt, 0, wrappedErr)
 			return nil, wrappedErr
 		}
-		if err := u.assets.Update(ctx, assetEntity); err != nil {
-			translatedErr := appservice.TranslateStorageError(err)
+		updatedOK, updateErr := u.assets.UpdateIfUnchanged(ctx, &updatedAsset, expectedAssetUpdatedAt)
+		if updateErr != nil {
+			translatedErr := appservice.TranslateStorageError(updateErr)
 			u.trackOperationFailed(ctx, conversation.ProjectID, conversation.TargetType, "confirm", startedAt, 0, translatedErr)
 			return nil, translatedErr
 		}
-		result.Asset = assetEntity
+		if !updatedOK {
+			conflictErr := appservice.WrapConflict(fmt.Errorf("asset was modified during confirmation; please retry"))
+			u.trackOperationFailed(ctx, conversation.ProjectID, conversation.TargetType, "confirm", startedAt, 0, conflictErr)
+			return nil, conflictErr
+		}
+		result.Asset = &updatedAsset
 	default:
 		err := appservice.WrapInvalidInput(fmt.Errorf("target_type must be one of project, asset"))
 		u.trackOperationFailed(ctx, conversation.ProjectID, conversation.TargetType, "confirm", startedAt, 0, err)
 		return nil, err
 	}
 
-	conversation.ClearPendingSuggestion(conversationUpdatedAt)
+	updatedConversation := *conversation
+	updatedConversation.ClearPendingSuggestion(conversationUpdatedAt)
 	systemMessage := newConversationMessage(conversationdomain.MessageRoleSystem, confirmedMessageContent(conversation.TargetType), conversationUpdatedAt)
-	if err := conversation.AppendMessage(systemMessage); err != nil {
+	if err := updatedConversation.AppendMessage(systemMessage); err != nil {
 		wrappedErr := appservice.WrapInvalidInput(err)
 		u.trackOperationFailed(ctx, conversation.ProjectID, conversation.TargetType, "confirm", startedAt, 0, wrappedErr)
 		return nil, wrappedErr
 	}
-	if err := u.conversations.Update(ctx, conversation); err != nil {
-		translatedErr := appservice.TranslateStorageError(err)
+	updatedOK, updateErr := u.conversations.UpdateIfUnchanged(ctx, &updatedConversation, expectedConversationUpdatedAt)
+	if updateErr != nil {
+		translatedErr := appservice.TranslateStorageError(updateErr)
 		u.trackOperationFailed(ctx, conversation.ProjectID, conversation.TargetType, "confirm", startedAt, 0, translatedErr)
 		return nil, translatedErr
 	}
-	result.Conversation = conversation
+	if !updatedOK {
+		conflictErr := appservice.WrapConflict(fmt.Errorf("conversation was modified during confirmation; please retry"))
+		u.trackOperationFailed(ctx, conversation.ProjectID, conversation.TargetType, "confirm", startedAt, 0, conflictErr)
+		return nil, conflictErr
+	}
+	result.Conversation = &updatedConversation
 	u.trackOperationSucceeded(ctx, conversation.ProjectID, conversation.TargetType, "confirm", startedAt, 0)
 	return result, nil
 }
@@ -536,11 +560,11 @@ func newConversationMessage(role, content string, createdAt time.Time) conversat
 func confirmedMessageContent(targetType string) string {
 	switch targetType {
 	case conversationdomain.TargetTypeProject:
-		return "Confirmed the latest project suggestion and applied it to the project."
+		return "已确认最新项目建议并写回项目。"
 	case conversationdomain.TargetTypeAsset:
-		return "Confirmed the latest asset suggestion and applied it to the asset."
+		return "已确认最新资产建议并写回资产。"
 	default:
-		return "Confirmed the latest suggestion."
+		return "已确认最新建议。"
 	}
 }
 
