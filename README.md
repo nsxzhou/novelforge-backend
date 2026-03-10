@@ -188,11 +188,14 @@ go test ./...
 当前重点覆盖：
 
 - 项目 / 资产 / 对话微调 HTTP handler 集成测试（基于内存仓储）
-- Conversation service 单元测试（start / reply / confirm / list）
-- Chapter service 与 handler 测试覆盖当前稿确认、重复确认幂等、未完成草稿拒绝与冲突映射
+- Conversation service 单元测试覆盖 `start / reply / get_by_id / list / confirm(project|asset)` 主路径与关键失败分支（无 pending suggestion、target 归属校验等）
+- Chapter service 与 handler 测试覆盖公共用例 `create / get_by_id / list_by_project / update`，以及章节生成链路中的当前稿确认、重复确认幂等、未完成草稿拒绝与冲突映射
+- Chapter rewrite 成功链路测试覆盖 `GenerationRecord` 成功落库与章节确认状态重置（`current_draft_confirmed_at/by` 清空）
+- Conversation confirm handler 集成测试覆盖 asset 响应分支（`project` 为空、`asset` 返回已确认内容）
 - Metric service 与 chapter/conversation 埋点集成单元测试（成功/失败事件、降级策略）
 - PostgreSQL repository SQL 路径测试（含 `pending_suggestion` 持久化，基于 sqlmock）
 - LLM 配置校验、OpenAI 兼容客户端工厂、Prompt Store 加载与渲染、bootstrap 装配测试
+- 配置层补充 `config.Load()` 成功/失败分支与 `ServerConfig.Address()` 单元测试
 - 本地 PostgreSQL 运行态验证流程：先执行 `go run ./cmd/migrate -config configs/config.yaml`，再启动 `go run ./cmd/server -config configs/config.yaml`
 
 ## 当前刻意保留的边界
