@@ -16,14 +16,18 @@ import (
 	generationdomain "novelforge/backend/internal/domain/generation"
 	projectdomain "novelforge/backend/internal/domain/project"
 	"novelforge/backend/internal/infra/http/middleware"
+	"novelforge/backend/internal/infra/llm/prompts"
 	"novelforge/backend/internal/infra/storage/memory"
 	appservice "novelforge/backend/internal/service"
 	assetservice "novelforge/backend/internal/service/asset"
 	chapterservice "novelforge/backend/internal/service/chapter"
 	conversationservice "novelforge/backend/internal/service/conversation"
+	metricservice "novelforge/backend/internal/service/metric"
 	projectservice "novelforge/backend/internal/service/project"
 	"novelforge/backend/pkg/config"
 
+	"github.com/cloudwego/eino/components/model"
+	"github.com/cloudwego/eino/schema"
 	"github.com/cloudwego/hertz/pkg/app/server"
 	"github.com/cloudwego/hertz/pkg/common/ut"
 	"github.com/cloudwego/hertz/pkg/protocol/consts"
@@ -54,6 +58,11 @@ type assetResponse struct {
 
 type assetListResponse struct {
 	Assets []assetResponse `json:"assets"`
+}
+
+type assetGenerationResponse struct {
+	Asset            assetResponse            `json:"asset"`
+	GenerationRecord generationRecordResponse `json:"generation_record"`
 }
 
 type chapterResponse struct {
@@ -179,13 +188,27 @@ func TestProjectAndAssetRoutesIntegration(t *testing.T) {
 		t.Fatalf("created asset project_id = %q, want %q", createdAsset.ProjectID, createdProject.ID)
 	}
 
+	generateAsset := performJSONRequest(h, consts.MethodPost, "/api/v1/projects/"+createdProject.ID+"/assets/generate", `{"type":"character","instruction":"生成一个主角人设，冷静且有野心。"}`)
+	assertStatusCode(t, generateAsset.Code, consts.StatusCreated)
+	var generated assetGenerationResponse
+	decodeResponseBody(t, generateAsset, &generated)
+	if generated.Asset.ID == "" || generated.Asset.ProjectID != createdProject.ID || generated.Asset.Type != "character" {
+		t.Fatalf("generated asset = %#v, want generated character asset", generated.Asset)
+	}
+	if generated.GenerationRecord.ID == "" || generated.GenerationRecord.Kind != generationdomain.KindAssetGeneration || generated.GenerationRecord.Status != generationdomain.StatusSucceeded {
+		t.Fatalf("generated record = %#v, want succeeded asset_generation record", generated.GenerationRecord)
+	}
+	if generated.GenerationRecord.OutputRef != generated.Asset.ID {
+		t.Fatalf("generated output_ref = %q, want asset id %q", generated.GenerationRecord.OutputRef, generated.Asset.ID)
+	}
+
 	listAssets := performRequest(h, consts.MethodGet, "/api/v1/projects/"+createdProject.ID+"/assets?limit=10&offset=0", "")
 	assertStatusCode(t, listAssets.Code, consts.StatusOK)
 
 	var assetList assetListResponse
 	decodeResponseBody(t, listAssets, &assetList)
-	if len(assetList.Assets) != 1 {
-		t.Fatalf("len(assets) = %d, want 1", len(assetList.Assets))
+	if len(assetList.Assets) != 2 {
+		t.Fatalf("len(assets) = %d, want 2", len(assetList.Assets))
 	}
 
 	listAssetsByType := performRequest(h, consts.MethodGet, "/api/v1/projects/"+createdProject.ID+"/assets?type=outline", "")
@@ -306,6 +329,10 @@ func TestRouteQueryAndJSONValidationIntegration(t *testing.T) {
 	assetMalformedJSON := performJSONRequest(h, consts.MethodPut, "/api/v1/assets/"+createdAsset.ID, `{"type":`)
 	assertStatusCode(t, assetMalformedJSON.Code, consts.StatusBadRequest)
 	assertErrorResponse(t, assetMalformedJSON)
+
+	assetGenerateMalformedJSON := performJSONRequest(h, consts.MethodPost, "/api/v1/projects/"+createdProject.ID+"/assets/generate", `{"type":`)
+	assertStatusCode(t, assetGenerateMalformedJSON.Code, consts.StatusBadRequest)
+	assertErrorResponse(t, assetGenerateMalformedJSON)
 }
 
 func TestServiceErrorMappingIntegration(t *testing.T) {
@@ -387,7 +414,7 @@ func TestConversationRoutesIntegration(t *testing.T) {
 			{ID: "55555555-5555-5555-5555-555555555555", Role: conversationdomain.MessageRoleAssistant, Content: `{"title":"Refined title","summary":"Refined summary"}`, CreatedAt: baseTime.Add(time.Minute)},
 			{ID: "66666666-6666-6666-6666-666666666666", Role: conversationdomain.MessageRoleUser, Content: "Make it darker.", CreatedAt: baseTime.Add(2 * time.Minute)},
 			{ID: "77777777-7777-7777-7777-777777777777", Role: conversationdomain.MessageRoleAssistant, Content: `{"title":"Updated title","summary":"Updated summary"}`, CreatedAt: baseTime.Add(3 * time.Minute)},
-			{ID: "88888888-8888-8888-8888-888888888888", Role: conversationdomain.MessageRoleSystem, Content: "Confirmed the latest project suggestion and applied it to the project.", CreatedAt: baseTime.Add(4 * time.Minute)},
+			{ID: "88888888-8888-8888-8888-888888888888", Role: conversationdomain.MessageRoleSystem, Content: "已确认最新项目建议并写回项目。", CreatedAt: baseTime.Add(4 * time.Minute)},
 		},
 		CreatedAt: baseTime,
 		UpdatedAt: baseTime.Add(4 * time.Minute),
@@ -507,7 +534,7 @@ func TestConversationConfirmAssetResponseIntegration(t *testing.T) {
 		Messages: []conversationdomain.Message{
 			{ID: "44444444-4444-4444-4444-444444444444", Role: conversationdomain.MessageRoleUser, Content: "优化资产。", CreatedAt: baseTime},
 			{ID: "55555555-5555-5555-5555-555555555555", Role: conversationdomain.MessageRoleAssistant, Content: `{"title":"更新标题","content":"更新内容"}`, CreatedAt: baseTime.Add(time.Minute)},
-			{ID: "66666666-6666-6666-6666-666666666666", Role: conversationdomain.MessageRoleSystem, Content: "Confirmed the latest asset suggestion and applied it to the asset.", CreatedAt: baseTime.Add(2 * time.Minute)},
+			{ID: "66666666-6666-6666-6666-666666666666", Role: conversationdomain.MessageRoleSystem, Content: "已确认最新资产建议并写回资产。", CreatedAt: baseTime.Add(2 * time.Minute)},
 		},
 		CreatedAt: baseTime,
 		UpdatedAt: baseTime.Add(2 * time.Minute),
@@ -1005,11 +1032,35 @@ func TestChapterRouteValidationAndErrorMappingIntegration(t *testing.T) {
 func newTestServer() *server.Hertz {
 	projectRepo := memory.NewProjectRepository()
 	assetRepo := memory.NewAssetRepository()
+	generationRepo := memory.NewGenerationRecordRepository()
+	metricRepo := memory.NewMetricEventRepository()
+	metricUseCase := metricservice.NewUseCase(metricservice.Dependencies{MetricEvents: metricRepo})
+	promptStore, err := prompts.LoadStore(config.PromptConfig{
+		"asset_generation":     "asset_generation.yaml",
+		"chapter_generation":   "chapter_generation.yaml",
+		"chapter_continuation": "chapter_continuation.yaml",
+		"chapter_rewrite":      "chapter_rewrite.yaml",
+		"project_refinement":   "project_refinement.yaml",
+		"asset_refinement":     "asset_refinement.yaml",
+	})
+	if err != nil {
+		panic(err)
+	}
 	conversationRepo := memory.NewConversationRepository()
 	projectUseCase := projectservice.NewUseCase(projectservice.Dependencies{Projects: projectRepo})
 	assetUseCase := assetservice.NewUseCase(assetservice.Dependencies{
-		Assets:   assetRepo,
-		Projects: projectRepo,
+		Assets:            assetRepo,
+		Projects:          projectRepo,
+		GenerationRecords: generationRepo,
+		LLMClient: &stubLLMClient{
+			chatModel: &stubChatModel{
+				generate: func(context.Context, []*schema.Message, ...model.Option) (*schema.Message, error) {
+					return &schema.Message{Content: `{"title":"自动生成资产","content":"自动生成内容"}`}, nil
+				},
+			},
+		},
+		PromptStore: promptStore,
+		Metrics:     metricUseCase,
 	})
 	conversationUseCase := stubConversationUseCase{}
 	_ = conversationRepo
@@ -1169,6 +1220,7 @@ func (s stubProjectUseCase) Update(ctx context.Context, project *projectdomain.P
 
 type stubAssetUseCase struct {
 	create            func(context.Context, *assetdomain.Asset) error
+	generate          func(context.Context, assetservice.GenerateParams) (*assetservice.GenerateResult, error)
 	getByID           func(context.Context, string) (*assetdomain.Asset, error)
 	listByProject     func(context.Context, assetdomain.ListByProjectParams) ([]*assetdomain.Asset, error)
 	listByProjectType func(context.Context, assetdomain.ListByProjectAndTypeParams) ([]*assetdomain.Asset, error)
@@ -1181,6 +1233,13 @@ func (s stubAssetUseCase) Create(ctx context.Context, asset *assetdomain.Asset) 
 		return s.create(ctx, asset)
 	}
 	return errors.New("unexpected Create call")
+}
+
+func (s stubAssetUseCase) Generate(ctx context.Context, params assetservice.GenerateParams) (*assetservice.GenerateResult, error) {
+	if s.generate != nil {
+		return s.generate(ctx, params)
+	}
+	return nil, errors.New("unexpected Generate call")
 }
 
 func (s stubAssetUseCase) GetByID(ctx context.Context, id string) (*assetdomain.Asset, error) {
@@ -1227,6 +1286,35 @@ type stubChapterUseCase struct {
 	continueFn    func(context.Context, chapterservice.ContinueParams) (*chapterservice.ContinueResult, error)
 	rewrite       func(context.Context, chapterservice.RewriteParams) (*chapterservice.RewriteResult, error)
 	confirm       func(context.Context, chapterservice.ConfirmParams) (*chapterdomain.Chapter, error)
+}
+
+type stubChatModel struct {
+	generate func(context.Context, []*schema.Message, ...model.Option) (*schema.Message, error)
+}
+
+func (s *stubChatModel) Generate(ctx context.Context, input []*schema.Message, opts ...model.Option) (*schema.Message, error) {
+	if s.generate != nil {
+		return s.generate(ctx, input, opts...)
+	}
+	return nil, errors.New("unexpected Generate call")
+}
+
+func (s *stubChatModel) Stream(context.Context, []*schema.Message, ...model.Option) (*schema.StreamReader[*schema.Message], error) {
+	return nil, errors.New("unexpected Stream call")
+}
+
+func (s *stubChatModel) WithTools(_ []*schema.ToolInfo) (model.ToolCallingChatModel, error) {
+	return s, nil
+}
+
+type stubLLMClient struct {
+	chatModel model.ToolCallingChatModel
+}
+
+func (s *stubLLMClient) Provider() string { return "stub" }
+func (s *stubLLMClient) Model() string    { return "stub-model" }
+func (s *stubLLMClient) ChatModel() model.ToolCallingChatModel {
+	return s.chatModel
 }
 
 func (s stubChapterUseCase) Create(ctx context.Context, chapter *chapterdomain.Chapter) error {

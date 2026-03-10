@@ -4,6 +4,7 @@ import (
 	"context"
 
 	assetdomain "novelforge/backend/internal/domain/asset"
+	generationdomain "novelforge/backend/internal/domain/generation"
 	assetservice "novelforge/backend/internal/service/asset"
 
 	"github.com/cloudwego/hertz/pkg/app"
@@ -26,6 +27,11 @@ type assetUpsertRequest struct {
 	Content string `json:"content"`
 }
 
+type assetGenerateRequest struct {
+	Type        string `json:"type"`
+	Instruction string `json:"instruction"`
+}
+
 type assetResponse struct {
 	ID        string `json:"id"`
 	ProjectID string `json:"project_id"`
@@ -38,6 +44,11 @@ type assetResponse struct {
 
 type assetListResponse struct {
 	Assets []assetResponse `json:"assets"`
+}
+
+type assetGenerationResponse struct {
+	Asset            assetResponse            `json:"asset"`
+	GenerationRecord generationRecordResponse `json:"generation_record"`
 }
 
 func (h *AssetHandler) Create(c context.Context, ctx *app.RequestContext) {
@@ -103,6 +114,26 @@ func (h *AssetHandler) ListByProject(c context.Context, ctx *app.RequestContext)
 	ctx.JSON(consts.StatusOK, assetListResponse{Assets: newAssetResponses(entities)})
 }
 
+func (h *AssetHandler) Generate(c context.Context, ctx *app.RequestContext) {
+	var request assetGenerateRequest
+	if err := ctx.BindJSON(&request); err != nil {
+		writeError(ctx, consts.StatusBadRequest, err.Error())
+		return
+	}
+
+	result, err := h.useCase.Generate(c, assetservice.GenerateParams{
+		ProjectID:   ctx.Param("projectID"),
+		Type:        request.Type,
+		Instruction: request.Instruction,
+	})
+	if err != nil {
+		writeServiceError(ctx, err)
+		return
+	}
+
+	ctx.JSON(consts.StatusCreated, newAssetGenerationResponse(result.Asset, result.GenerationRecord))
+}
+
 func (h *AssetHandler) GetByID(c context.Context, ctx *app.RequestContext) {
 	entity, err := h.useCase.GetByID(c, ctx.Param("assetID"))
 	if err != nil {
@@ -161,4 +192,11 @@ func newAssetResponses(entities []*assetdomain.Asset) []assetResponse {
 		responses = append(responses, newAssetResponse(entity))
 	}
 	return responses
+}
+
+func newAssetGenerationResponse(asset *assetdomain.Asset, record *generationdomain.GenerationRecord) assetGenerationResponse {
+	return assetGenerationResponse{
+		Asset:            newAssetResponse(asset),
+		GenerationRecord: newGenerationRecordResponse(record),
+	}
 }

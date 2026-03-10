@@ -36,6 +36,7 @@ func RegisterRoutes(h *server.Hertz, deps Dependencies) {
 	v1.GET("/projects/:projectID", projectHandler.GetByID)
 	v1.PUT("/projects/:projectID", projectHandler.Update)
 	v1.POST("/projects/:projectID/assets", assetHandler.Create)
+	v1.POST("/projects/:projectID/assets/generate", assetHandler.Generate)
 	v1.GET("/projects/:projectID/assets", assetHandler.ListByProject)
 	v1.POST("/projects/:projectID/chapters", chapterHandler.Create)
 	v1.GET("/projects/:projectID/chapters", chapterHandler.ListByProject)
