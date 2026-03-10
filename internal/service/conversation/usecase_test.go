@@ -410,4 +410,254 @@ func TestUseCaseReplySkipsMetricWhenProjectIDUnavailable(t *testing.T) {
 	}
 }
 
+func TestUseCaseGetByIDAndListFlow(t *testing.T) {
+	projectRepo := memory.NewProjectRepository()
+	assetRepo := memory.NewAssetRepository()
+	conversationRepo := memory.NewConversationRepository()
+	project := createProjectEntity(t, projectRepo)
+	asset := createAssetEntity(t, assetRepo, project.ID)
+	baseTime := time.Date(2026, 3, 9, 12, 0, 0, 0, time.UTC)
+
+	projectConversation := &conversationdomain.Conversation{
+		ID:         "33333333-3333-3333-3333-333333333333",
+		ProjectID:  project.ID,
+		TargetType: conversationdomain.TargetTypeProject,
+		TargetID:   project.ID,
+		Messages: []conversationdomain.Message{
+			{ID: "44444444-4444-4444-4444-444444444444", Role: conversationdomain.MessageRoleUser, Content: "优化项目标题。", CreatedAt: baseTime},
+		},
+		CreatedAt: baseTime,
+		UpdatedAt: baseTime,
+	}
+	assetConversation := &conversationdomain.Conversation{
+		ID:         "55555555-5555-5555-5555-555555555555",
+		ProjectID:  project.ID,
+		TargetType: conversationdomain.TargetTypeAsset,
+		TargetID:   asset.ID,
+		Messages: []conversationdomain.Message{
+			{ID: "66666666-6666-6666-6666-666666666666", Role: conversationdomain.MessageRoleUser, Content: "优化资产。", CreatedAt: baseTime.Add(time.Minute)},
+		},
+		CreatedAt: baseTime.Add(time.Minute),
+		UpdatedAt: baseTime.Add(time.Minute),
+	}
+	if err := conversationRepo.Create(context.Background(), projectConversation); err != nil {
+		t.Fatalf("Create(project conversation) error = %v", err)
+	}
+	if err := conversationRepo.Create(context.Background(), assetConversation); err != nil {
+		t.Fatalf("Create(asset conversation) error = %v", err)
+	}
+
+	useCase := NewUseCase(Dependencies{
+		Conversations: conversationRepo,
+		Projects:      projectRepo,
+		Assets:        assetRepo,
+	})
+
+	got, err := useCase.GetByID(context.Background(), projectConversation.ID)
+	if err != nil {
+		t.Fatalf("GetByID() error = %v", err)
+	}
+	if got.ID != projectConversation.ID || got.TargetType != conversationdomain.TargetTypeProject {
+		t.Fatalf("GetByID() = %#v, want project conversation", got)
+	}
+
+	allItems, err := useCase.List(context.Background(), ListParams{
+		ProjectID: project.ID,
+		Limit:     10,
+		Offset:    0,
+	})
+	if err != nil {
+		t.Fatalf("List(project) error = %v", err)
+	}
+	if len(allItems) != 2 {
+		t.Fatalf("len(List(project)) = %d, want 2", len(allItems))
+	}
+
+	assetItems, err := useCase.List(context.Background(), ListParams{
+		ProjectID:  project.ID,
+		TargetType: conversationdomain.TargetTypeAsset,
+		TargetID:   asset.ID,
+		Limit:      10,
+		Offset:     0,
+	})
+	if err != nil {
+		t.Fatalf("List(target) error = %v", err)
+	}
+	if len(assetItems) != 1 || assetItems[0].ID != assetConversation.ID {
+		t.Fatalf("List(target) = %#v, want one asset conversation", assetItems)
+	}
+}
+
+func TestUseCaseGetByIDAndListValidation(t *testing.T) {
+	projectRepo := memory.NewProjectRepository()
+	assetRepo := memory.NewAssetRepository()
+	conversationRepo := memory.NewConversationRepository()
+	useCase := NewUseCase(Dependencies{
+		Conversations: conversationRepo,
+		Projects:      projectRepo,
+		Assets:        assetRepo,
+	})
+
+	if _, err := useCase.GetByID(context.Background(), "not-a-uuid"); !errors.Is(err, appservice.ErrInvalidInput) {
+		t.Fatalf("GetByID(invalid id) error = %v, want invalid input", err)
+	}
+	if _, err := useCase.GetByID(context.Background(), "11111111-1111-1111-1111-111111111111"); !errors.Is(err, appservice.ErrNotFound) {
+		t.Fatalf("GetByID(not found) error = %v, want not found", err)
+	}
+
+	if _, err := useCase.List(context.Background(), ListParams{ProjectID: "not-a-uuid"}); !errors.Is(err, appservice.ErrInvalidInput) {
+		t.Fatalf("List(invalid project_id) error = %v, want invalid input", err)
+	}
+	if _, err := useCase.List(context.Background(), ListParams{ProjectID: "11111111-1111-1111-1111-111111111111"}); !errors.Is(err, appservice.ErrNotFound) {
+		t.Fatalf("List(project not found) error = %v, want not found", err)
+	}
+
+	project := createProjectEntity(t, projectRepo)
+	if _, err := useCase.List(context.Background(), ListParams{ProjectID: project.ID, TargetType: conversationdomain.TargetTypeProject}); !errors.Is(err, appservice.ErrInvalidInput) {
+		t.Fatalf("List(target_type only) error = %v, want invalid input", err)
+	}
+}
+
+func TestUseCaseConfirmAssetAppliesSuggestionAndClearsPending(t *testing.T) {
+	projectRepo := memory.NewProjectRepository()
+	assetRepo := memory.NewAssetRepository()
+	conversationRepo := memory.NewConversationRepository()
+	metricRepo := memory.NewMetricEventRepository()
+	project := createProjectEntity(t, projectRepo)
+	asset := createAssetEntity(t, assetRepo, project.ID)
+	baseTime := time.Date(2026, 3, 9, 12, 0, 0, 0, time.UTC)
+
+	conversationEntity := &conversationdomain.Conversation{
+		ID:         "33333333-3333-3333-3333-333333333333",
+		ProjectID:  project.ID,
+		TargetType: conversationdomain.TargetTypeAsset,
+		TargetID:   asset.ID,
+		Messages: []conversationdomain.Message{
+			{ID: "44444444-4444-4444-4444-444444444444", Role: conversationdomain.MessageRoleUser, Content: "优化资产。", CreatedAt: baseTime},
+			{ID: "55555555-5555-5555-5555-555555555555", Role: conversationdomain.MessageRoleAssistant, Content: `{"title":"更新标题","content":"更新内容"}`, CreatedAt: baseTime.Add(time.Minute)},
+		},
+		PendingSuggestion: &conversationdomain.PendingSuggestion{Title: "更新标题", Content: "更新内容"},
+		CreatedAt:         baseTime,
+		UpdatedAt:         baseTime.Add(time.Minute),
+	}
+	if err := conversationRepo.Create(context.Background(), conversationEntity); err != nil {
+		t.Fatalf("Create(conversation) error = %v", err)
+	}
+
+	useCase := NewUseCase(Dependencies{
+		Conversations: conversationRepo,
+		Projects:      projectRepo,
+		Assets:        assetRepo,
+		Metrics:       newMetricUseCase(metricRepo),
+	})
+
+	result, err := useCase.Confirm(context.Background(), conversationEntity.ID)
+	if err != nil {
+		t.Fatalf("Confirm() error = %v", err)
+	}
+	if result.Asset == nil {
+		t.Fatal("Asset = nil, want updated asset")
+	}
+	if result.Asset.Title != "更新标题" || result.Asset.Content != "更新内容" {
+		t.Fatalf("Asset = %#v, want confirmed values", result.Asset)
+	}
+	if result.Conversation.PendingSuggestion != nil {
+		t.Fatalf("PendingSuggestion = %#v, want nil", result.Conversation.PendingSuggestion)
+	}
+	lastMessage := result.Conversation.Messages[len(result.Conversation.Messages)-1]
+	if lastMessage.Role != conversationdomain.MessageRoleSystem || !strings.Contains(lastMessage.Content, "asset") {
+		t.Fatalf("last message = %#v, want system confirm message for asset", lastMessage)
+	}
+
+	storedAsset, err := assetRepo.GetByID(context.Background(), asset.ID)
+	if err != nil {
+		t.Fatalf("GetByID(asset) error = %v", err)
+	}
+	if storedAsset.Title != "更新标题" || storedAsset.Content != "更新内容" {
+		t.Fatalf("stored asset = %#v, want updated values", storedAsset)
+	}
+
+	completedEvents, err := metricRepo.ListByProject(context.Background(), metricdomain.ListByProjectParams{
+		ProjectID: project.ID,
+		EventName: metricdomain.EventOperationCompleted,
+	})
+	if err != nil {
+		t.Fatalf("ListByProject(metric) error = %v", err)
+	}
+	if len(completedEvents) != 1 {
+		t.Fatalf("len(completedEvents) = %d, want 1", len(completedEvents))
+	}
+	if completedEvents[0].Labels["action"] != "confirm" || completedEvents[0].Labels["target_type"] != conversationdomain.TargetTypeAsset {
+		t.Fatalf("confirm event labels = %#v, want confirm/asset", completedEvents[0].Labels)
+	}
+}
+
+func TestUseCaseConfirmRejectsInvalidAssetConversation(t *testing.T) {
+	projectRepo := memory.NewProjectRepository()
+	assetRepo := memory.NewAssetRepository()
+	conversationRepo := memory.NewConversationRepository()
+	project := createProjectEntity(t, projectRepo)
+	asset := createAssetEntity(t, assetRepo, project.ID)
+	baseTime := time.Date(2026, 3, 9, 12, 0, 0, 0, time.UTC)
+
+	withoutPending := &conversationdomain.Conversation{
+		ID:         "33333333-3333-3333-3333-333333333333",
+		ProjectID:  project.ID,
+		TargetType: conversationdomain.TargetTypeAsset,
+		TargetID:   asset.ID,
+		Messages: []conversationdomain.Message{
+			{ID: "44444444-4444-4444-4444-444444444444", Role: conversationdomain.MessageRoleUser, Content: "无 pending。", CreatedAt: baseTime},
+		},
+		CreatedAt: baseTime,
+		UpdatedAt: baseTime,
+	}
+	if err := conversationRepo.Create(context.Background(), withoutPending); err != nil {
+		t.Fatalf("Create(without pending) error = %v", err)
+	}
+
+	useCase := NewUseCase(Dependencies{
+		Conversations: conversationRepo,
+		Projects:      projectRepo,
+		Assets:        assetRepo,
+	})
+
+	if _, err := useCase.Confirm(context.Background(), "not-a-uuid"); !errors.Is(err, appservice.ErrInvalidInput) {
+		t.Fatalf("Confirm(invalid id) error = %v, want invalid input", err)
+	}
+	if _, err := useCase.Confirm(context.Background(), withoutPending.ID); !errors.Is(err, appservice.ErrInvalidInput) {
+		t.Fatalf("Confirm(without pending) error = %v, want invalid input", err)
+	}
+
+	otherProjectRepo := memory.NewProjectRepository()
+	otherAssetRepo := memory.NewAssetRepository()
+	otherConversationRepo := memory.NewConversationRepository()
+	otherProject := createProjectEntity(t, otherProjectRepo)
+	otherAsset := createAssetEntity(t, otherAssetRepo, otherProject.ID)
+	otherConversation := &conversationdomain.Conversation{
+		ID:                "55555555-5555-5555-5555-555555555555",
+		ProjectID:         otherProject.ID,
+		TargetType:        conversationdomain.TargetTypeAsset,
+		TargetID:          otherAsset.ID,
+		PendingSuggestion: &conversationdomain.PendingSuggestion{Title: "新标题", Content: "新内容"},
+		CreatedAt:         baseTime,
+		UpdatedAt:         baseTime,
+	}
+	otherAsset.ProjectID = "66666666-6666-6666-6666-666666666666"
+	if err := otherAssetRepo.Update(context.Background(), otherAsset); err != nil {
+		t.Fatalf("Update(other asset project_id) error = %v", err)
+	}
+	if err := otherConversationRepo.Create(context.Background(), otherConversation); err != nil {
+		t.Fatalf("Create(other conversation) error = %v", err)
+	}
+
+	otherUseCase := NewUseCase(Dependencies{
+		Conversations: otherConversationRepo,
+		Projects:      otherProjectRepo,
+		Assets:        otherAssetRepo,
+	})
+	if _, err := otherUseCase.Confirm(context.Background(), otherConversation.ID); !errors.Is(err, appservice.ErrInvalidInput) {
+		t.Fatalf("Confirm(asset mismatch) error = %v, want invalid input", err)
+	}
+}
+
 var _ llm.Client = (*stubLLMClient)(nil)

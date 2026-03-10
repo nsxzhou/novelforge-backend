@@ -1,6 +1,8 @@
 package config
 
 import (
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -177,4 +179,77 @@ func TestAppConfigValidateIncludesLLM(t *testing.T) {
 	if !strings.Contains(err.Error(), "invalid llm config") {
 		t.Fatalf("Validate() error = %v, want llm wrapper", err)
 	}
+}
+
+func TestServerConfigAddress(t *testing.T) {
+	cfg := ServerConfig{Host: "127.0.0.1", Port: 18080}
+	if got, want := cfg.Address(), "127.0.0.1:18080"; got != want {
+		t.Fatalf("Address() = %q, want %q", got, want)
+	}
+}
+
+func TestLoad(t *testing.T) {
+	t.Run("success", func(t *testing.T) {
+		dir := t.TempDir()
+		path := filepath.Join(dir, "config.yaml")
+		content := `
+server:
+  host: "127.0.0.1"
+  port: 8080
+  read_timeout_seconds: 10
+  write_timeout_seconds: 10
+storage:
+  provider: "memory"
+llm:
+  provider: "openai_compatible"
+  model: "gpt-4o-mini"
+  base_url: "https://api.openai.com/v1"
+  api_key_env: "NOVELFORGE_LLM_API_KEY"
+  timeout_seconds: 60
+  prompts:
+    asset_generation: "asset_generation.yaml"
+    chapter_generation: "chapter_generation.yaml"
+    chapter_continuation: "chapter_continuation.yaml"
+    chapter_rewrite: "chapter_rewrite.yaml"
+    project_refinement: "project_refinement.yaml"
+    asset_refinement: "asset_refinement.yaml"
+`
+		if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+			t.Fatalf("WriteFile() error = %v", err)
+		}
+
+		cfg, err := Load(path)
+		if err != nil {
+			t.Fatalf("Load() error = %v", err)
+		}
+		if cfg.Server.Host != "127.0.0.1" || cfg.Storage.Provider != StorageProviderMemory || cfg.LLM.Provider != LLMProviderOpenAICompatible {
+			t.Fatalf("Load() cfg = %#v, want parsed app config", cfg)
+		}
+	})
+
+	t.Run("file not found", func(t *testing.T) {
+		_, err := Load(filepath.Join(t.TempDir(), "missing.yaml"))
+		if err == nil {
+			t.Fatal("Load() error = nil, want read config error")
+		}
+		if !strings.Contains(err.Error(), "read config file") {
+			t.Fatalf("Load() error = %v, want read config wrapper", err)
+		}
+	})
+
+	t.Run("invalid yaml", func(t *testing.T) {
+		dir := t.TempDir()
+		path := filepath.Join(dir, "broken.yaml")
+		if err := os.WriteFile(path, []byte("server:\n  host: [\n"), 0o600); err != nil {
+			t.Fatalf("WriteFile() error = %v", err)
+		}
+
+		_, err := Load(path)
+		if err == nil {
+			t.Fatal("Load() error = nil, want yaml unmarshal error")
+		}
+		if !strings.Contains(err.Error(), "unmarshal config yaml") {
+			t.Fatalf("Load() error = %v, want yaml wrapper", err)
+		}
+	})
 }

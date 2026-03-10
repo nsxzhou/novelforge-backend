@@ -491,6 +491,69 @@ func TestConversationRoutesIntegration(t *testing.T) {
 	}
 }
 
+func TestConversationConfirmAssetResponseIntegration(t *testing.T) {
+	const (
+		projectID      = "11111111-1111-1111-1111-111111111111"
+		assetID        = "22222222-2222-2222-2222-222222222222"
+		conversationID = "33333333-3333-3333-3333-333333333333"
+	)
+
+	baseTime := time.Date(2026, 3, 9, 12, 0, 0, 0, time.UTC)
+	confirmedConversation := &conversationdomain.Conversation{
+		ID:         conversationID,
+		ProjectID:  projectID,
+		TargetType: conversationdomain.TargetTypeAsset,
+		TargetID:   assetID,
+		Messages: []conversationdomain.Message{
+			{ID: "44444444-4444-4444-4444-444444444444", Role: conversationdomain.MessageRoleUser, Content: "优化资产。", CreatedAt: baseTime},
+			{ID: "55555555-5555-5555-5555-555555555555", Role: conversationdomain.MessageRoleAssistant, Content: `{"title":"更新标题","content":"更新内容"}`, CreatedAt: baseTime.Add(time.Minute)},
+			{ID: "66666666-6666-6666-6666-666666666666", Role: conversationdomain.MessageRoleSystem, Content: "Confirmed the latest asset suggestion and applied it to the asset.", CreatedAt: baseTime.Add(2 * time.Minute)},
+		},
+		CreatedAt: baseTime,
+		UpdatedAt: baseTime.Add(2 * time.Minute),
+	}
+	confirmedAsset := &assetdomain.Asset{
+		ID:        assetID,
+		ProjectID: projectID,
+		Type:      assetdomain.TypeOutline,
+		Title:     "更新标题",
+		Content:   "更新内容",
+		CreatedAt: baseTime.Add(-time.Hour),
+		UpdatedAt: baseTime.Add(2 * time.Minute),
+	}
+
+	h := newTestServerWithUseCases(
+		stubProjectUseCase{},
+		stubAssetUseCase{},
+		stubConversationUseCase{
+			confirm: func(_ context.Context, id string) (*conversationservice.ConfirmResult, error) {
+				if id != conversationID {
+					t.Fatalf("Confirm id = %q, want %q", id, conversationID)
+				}
+				return &conversationservice.ConfirmResult{
+					Conversation: confirmedConversation,
+					Asset:        confirmedAsset,
+				}, nil
+			},
+		},
+	)
+
+	recorder := performRequest(h, consts.MethodPost, "/api/v1/conversations/"+conversationID+"/confirm", "")
+	assertStatusCode(t, recorder.Code, consts.StatusOK)
+
+	var confirmed confirmConversationResponse
+	decodeResponseBody(t, recorder, &confirmed)
+	if confirmed.Project != nil {
+		t.Fatalf("confirmed project = %#v, want nil", confirmed.Project)
+	}
+	if confirmed.Asset == nil {
+		t.Fatal("confirmed asset = nil, want non-nil")
+	}
+	if confirmed.Asset.ID != assetID || confirmed.Asset.Title != "更新标题" || confirmed.Asset.Content != "更新内容" {
+		t.Fatalf("confirmed asset = %#v, want confirmed asset payload", confirmed.Asset)
+	}
+}
+
 func TestConversationRouteValidationAndErrorMappingIntegration(t *testing.T) {
 	const (
 		projectID      = "11111111-1111-1111-1111-111111111111"

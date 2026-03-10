@@ -135,6 +135,269 @@ func (s *metricUseCaseSpy) ListByProject(context.Context, metricdomain.ListByPro
 	return nil, nil
 }
 
+func TestUseCaseCreateGetListUpdateFlow(t *testing.T) {
+	projectRepo := memory.NewProjectRepository()
+	chapterRepo := memory.NewChapterRepository()
+	project := createProjectEntity(t, projectRepo, "11111111-1111-1111-1111-111111111111")
+	useCase := NewUseCase(Dependencies{
+		Chapters:          chapterRepo,
+		Projects:          projectRepo,
+		Assets:            memory.NewAssetRepository(),
+		GenerationRecords: memory.NewGenerationRecordRepository(),
+	})
+
+	createInput := &chapterdomain.Chapter{
+		ProjectID: project.ID,
+		Title:     "  第一章 初遇  ",
+		Ordinal:   1,
+		Status:    chapterdomain.StatusDraft,
+		Content:   "  初始正文  ",
+	}
+	if err := useCase.Create(context.Background(), createInput); err != nil {
+		t.Fatalf("Create() error = %v", err)
+	}
+	if createInput.ID == "" {
+		t.Fatal("Create() should set chapter ID")
+	}
+
+	stored, err := chapterRepo.GetByID(context.Background(), createInput.ID)
+	if err != nil {
+		t.Fatalf("GetByID(chapterRepo) error = %v", err)
+	}
+	if stored.Title != "第一章 初遇" || stored.Content != "初始正文" {
+		t.Fatalf("stored chapter = %#v, want trimmed title/content", stored)
+	}
+	if stored.ProjectID != project.ID {
+		t.Fatalf("stored project_id = %q, want %q", stored.ProjectID, project.ID)
+	}
+
+	got, err := useCase.GetByID(context.Background(), createInput.ID)
+	if err != nil {
+		t.Fatalf("GetByID(useCase) error = %v", err)
+	}
+	if got.ID != createInput.ID {
+		t.Fatalf("GetByID(useCase) id = %q, want %q", got.ID, createInput.ID)
+	}
+
+	items, err := useCase.ListByProject(context.Background(), chapterdomain.ListByProjectParams{ProjectID: project.ID, Limit: 10, Offset: 0})
+	if err != nil {
+		t.Fatalf("ListByProject() error = %v", err)
+	}
+	if len(items) != 1 || items[0].ID != createInput.ID {
+		t.Fatalf("ListByProject() = %#v, want one created chapter", items)
+	}
+
+	createdAt := stored.CreatedAt
+	originalProjectID := stored.ProjectID
+	originalCurrentDraftID := stored.CurrentDraftID
+	originalConfirmedAt := stored.CurrentDraftConfirmedAt
+	originalConfirmedBy := stored.CurrentDraftConfirmedBy
+
+	updateInput := &chapterdomain.Chapter{
+		ID:        createInput.ID,
+		ProjectID: "99999999-9999-9999-9999-999999999999", // 应被忽略
+		Title:     "  第一章 修订  ",
+		Ordinal:   2,
+		Status:    chapterdomain.StatusDraft,
+		Content:   "  修订正文  ",
+	}
+	if err := useCase.Update(context.Background(), updateInput); err != nil {
+		t.Fatalf("Update() error = %v", err)
+	}
+
+	updated, err := chapterRepo.GetByID(context.Background(), createInput.ID)
+	if err != nil {
+		t.Fatalf("GetByID(updated) error = %v", err)
+	}
+	if updated.ProjectID != originalProjectID {
+		t.Fatalf("updated project_id = %q, want immutable %q", updated.ProjectID, originalProjectID)
+	}
+	if !updated.CreatedAt.Equal(createdAt) {
+		t.Fatalf("updated created_at = %v, want %v", updated.CreatedAt, createdAt)
+	}
+	if updated.Ordinal != 2 || updated.Title != "第一章 修订" || updated.Content != "修订正文" {
+		t.Fatalf("updated chapter = %#v, want updated ordinal/title/content", updated)
+	}
+	if updated.CurrentDraftID != originalCurrentDraftID || updated.CurrentDraftConfirmedBy != originalConfirmedBy || updated.CurrentDraftConfirmedAt != originalConfirmedAt {
+		t.Fatalf("updated draft confirmation fields changed unexpectedly: %#v", updated)
+	}
+}
+
+func TestUseCaseCreateAndUpdateErrorCases(t *testing.T) {
+	projectRepo := memory.NewProjectRepository()
+	chapterRepo := memory.NewChapterRepository()
+	useCase := NewUseCase(Dependencies{
+		Chapters:          chapterRepo,
+		Projects:          projectRepo,
+		Assets:            memory.NewAssetRepository(),
+		GenerationRecords: memory.NewGenerationRecordRepository(),
+	})
+
+	if err := useCase.Create(context.Background(), nil); !errors.Is(err, appservice.ErrInvalidInput) {
+		t.Fatalf("Create(nil) error = %v, want invalid input", err)
+	}
+
+	orphanProjectID := "11111111-1111-1111-1111-111111111111"
+	err := useCase.Create(context.Background(), &chapterdomain.Chapter{
+		ProjectID: orphanProjectID,
+		Title:     "第一章",
+		Ordinal:   1,
+		Status:    chapterdomain.StatusDraft,
+		Content:   "正文",
+	})
+	if !errors.Is(err, appservice.ErrNotFound) {
+		t.Fatalf("Create() orphan project error = %v, want not found", err)
+	}
+
+	project := createProjectEntity(t, projectRepo, "22222222-2222-2222-2222-222222222222")
+	first := &chapterdomain.Chapter{
+		ProjectID: project.ID,
+		Title:     "第一章",
+		Ordinal:   1,
+		Status:    chapterdomain.StatusDraft,
+		Content:   "正文",
+	}
+	if err := useCase.Create(context.Background(), first); err != nil {
+		t.Fatalf("Create(first) error = %v", err)
+	}
+
+	dup := &chapterdomain.Chapter{
+		ProjectID: project.ID,
+		Title:     "第二章",
+		Ordinal:   1,
+		Status:    chapterdomain.StatusDraft,
+		Content:   "正文",
+	}
+	err = useCase.Create(context.Background(), dup)
+	if !errors.Is(err, appservice.ErrInvalidInput) {
+		t.Fatalf("Create(dup ordinal) error = %v, want invalid input", err)
+	}
+	if !strings.Contains(err.Error(), "ordinal already exists") {
+		t.Fatalf("Create(dup ordinal) error = %v, want duplicate ordinal message", err)
+	}
+
+	err = useCase.Update(context.Background(), nil)
+	if !errors.Is(err, appservice.ErrInvalidInput) {
+		t.Fatalf("Update(nil) error = %v, want invalid input", err)
+	}
+
+	err = useCase.Update(context.Background(), &chapterdomain.Chapter{ID: "not-a-uuid"})
+	if !errors.Is(err, appservice.ErrInvalidInput) {
+		t.Fatalf("Update(invalid id) error = %v, want invalid input", err)
+	}
+
+	err = useCase.Update(context.Background(), &chapterdomain.Chapter{
+		ID:      "33333333-3333-3333-3333-333333333333",
+		Title:   "不存在",
+		Ordinal: 1,
+		Status:  chapterdomain.StatusDraft,
+		Content: "正文",
+	})
+	if !errors.Is(err, appservice.ErrNotFound) {
+		t.Fatalf("Update(not found) error = %v, want not found", err)
+	}
+}
+
+func TestUseCaseGetByIDAndListByProjectValidation(t *testing.T) {
+	projectRepo := memory.NewProjectRepository()
+	chapterRepo := memory.NewChapterRepository()
+	useCase := NewUseCase(Dependencies{
+		Chapters:          chapterRepo,
+		Projects:          projectRepo,
+		Assets:            memory.NewAssetRepository(),
+		GenerationRecords: memory.NewGenerationRecordRepository(),
+	})
+
+	if _, err := useCase.GetByID(context.Background(), "not-a-uuid"); !errors.Is(err, appservice.ErrInvalidInput) {
+		t.Fatalf("GetByID(invalid) error = %v, want invalid input", err)
+	}
+	if _, err := useCase.GetByID(context.Background(), "11111111-1111-1111-1111-111111111111"); !errors.Is(err, appservice.ErrNotFound) {
+		t.Fatalf("GetByID(not found) error = %v, want not found", err)
+	}
+
+	if _, err := useCase.ListByProject(context.Background(), chapterdomain.ListByProjectParams{ProjectID: "not-a-uuid"}); !errors.Is(err, appservice.ErrInvalidInput) {
+		t.Fatalf("ListByProject(invalid project id) error = %v, want invalid input", err)
+	}
+
+	if _, err := useCase.ListByProject(context.Background(), chapterdomain.ListByProjectParams{ProjectID: "11111111-1111-1111-1111-111111111111"}); !errors.Is(err, appservice.ErrNotFound) {
+		t.Fatalf("ListByProject(project not found) error = %v, want not found", err)
+	}
+}
+
+func TestUseCaseRewriteCreatesSucceededRecordAndResetsConfirmation(t *testing.T) {
+	projectRepo := memory.NewProjectRepository()
+	assetRepo := memory.NewAssetRepository()
+	chapterRepo := memory.NewChapterRepository()
+	generationRepo := memory.NewGenerationRecordRepository()
+	project := createProjectEntity(t, projectRepo, "11111111-1111-1111-1111-111111111111")
+	createAssetEntity(t, assetRepo, "22222222-2222-2222-2222-222222222222", project.ID, assetdomain.TypeOutline, "主线大纲", "主角在王城发生冲突。")
+	confirmedAt := time.Now().UTC().Add(-2 * time.Minute)
+	chapter := createChapterEntity(t, chapterRepo, &chapterdomain.Chapter{
+		ID:                      "33333333-3333-3333-3333-333333333333",
+		ProjectID:               project.ID,
+		Title:                   "第一章",
+		Ordinal:                 1,
+		Status:                  chapterdomain.StatusConfirmed,
+		Content:                 "旧片段。其余正文。",
+		CurrentDraftID:          "44444444-4444-4444-4444-444444444444",
+		CurrentDraftConfirmedAt: &confirmedAt,
+		CurrentDraftConfirmedBy: "55555555-5555-5555-5555-555555555555",
+		CreatedAt:               time.Now().UTC().Add(-time.Hour),
+		UpdatedAt:               confirmedAt,
+	})
+
+	useCase := NewUseCase(Dependencies{
+		Chapters:          chapterRepo,
+		Projects:          projectRepo,
+		Assets:            assetRepo,
+		GenerationRecords: generationRepo,
+		PromptStore:       loadTestPromptStore(t),
+		LLMClient: &stubLLMClient{chatModel: &stubChatModel{generate: func(_ context.Context, _ []*schema.Message, _ ...model.Option) (*schema.Message, error) {
+			return &schema.Message{Content: "新片段。其余正文。"}, nil
+		}}},
+	})
+
+	result, err := useCase.Rewrite(context.Background(), RewriteParams{
+		ChapterID:   chapter.ID,
+		TargetText:  "旧片段",
+		Instruction: "把旧片段改得更紧张。",
+	})
+	if err != nil {
+		t.Fatalf("Rewrite() error = %v", err)
+	}
+	if result.Chapter.Status != chapterdomain.StatusDraft {
+		t.Fatalf("chapter status = %q, want %q", result.Chapter.Status, chapterdomain.StatusDraft)
+	}
+	if result.Chapter.CurrentDraftID != result.GenerationRecord.ID {
+		t.Fatalf("current_draft_id = %q, want %q", result.Chapter.CurrentDraftID, result.GenerationRecord.ID)
+	}
+	if result.Chapter.CurrentDraftConfirmedAt != nil || result.Chapter.CurrentDraftConfirmedBy != "" {
+		t.Fatalf("confirmation fields = %#v/%q, want reset", result.Chapter.CurrentDraftConfirmedAt, result.Chapter.CurrentDraftConfirmedBy)
+	}
+	if result.GenerationRecord.Kind != generationdomain.KindChapterRewrite || result.GenerationRecord.Status != generationdomain.StatusSucceeded {
+		t.Fatalf("generation record = %#v, want succeeded rewrite record", result.GenerationRecord)
+	}
+	if result.GenerationRecord.OutputRef != "新片段。其余正文。" {
+		t.Fatalf("generation output_ref = %q, want rewritten content", result.GenerationRecord.OutputRef)
+	}
+
+	storedRecord, err := generationRepo.GetByID(context.Background(), result.GenerationRecord.ID)
+	if err != nil {
+		t.Fatalf("GetByID(generation) error = %v", err)
+	}
+	if storedRecord.Status != generationdomain.StatusSucceeded {
+		t.Fatalf("stored record status = %q, want %q", storedRecord.Status, generationdomain.StatusSucceeded)
+	}
+
+	storedChapter, err := chapterRepo.GetByID(context.Background(), chapter.ID)
+	if err != nil {
+		t.Fatalf("GetByID(chapter) error = %v", err)
+	}
+	if storedChapter.Content != "新片段。其余正文。" || storedChapter.CurrentDraftID != result.GenerationRecord.ID {
+		t.Fatalf("stored chapter = %#v, want rewritten content and new draft", storedChapter)
+	}
+}
+
 func TestUseCaseGenerateCreatesChapterAndGenerationRecord(t *testing.T) {
 	projectRepo := memory.NewProjectRepository()
 	assetRepo := memory.NewAssetRepository()
