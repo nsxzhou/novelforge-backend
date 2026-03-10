@@ -27,6 +27,7 @@
   - `PUT /api/v1/assets/:assetID`
   - `DELETE /api/v1/assets/:assetID`
   - `GET /api/v1/chapters/:chapterID`
+  - `POST /api/v1/chapters/:chapterID/confirm`
   - `POST /api/v1/chapters/:chapterID/continue`
   - `POST /api/v1/chapters/:chapterID/rewrite`
   - `GET /api/v1/conversations/:conversationID`
@@ -61,7 +62,7 @@ V1 全部 6 个领域聚合已落地，每个聚合包含实体定义（`model.g
 - `service/project`：项目创建 / 列表 / 查询 / 更新
 - `service/asset`：资产创建 / 列表 / 按类型过滤 / 查询 / 更新 / 删除
 - `service/conversation`：对话发起 / 继续 / 查询 / 按 project/target 列表 / 显式确认写回 Project / Asset
-- `service/chapter`：章节生成 / 列表 / 查询 / 续写 / 局部重写，并为章节生成流创建和更新 `GenerationRecord`
+- `service/chapter`：章节生成 / 列表 / 查询 / 当前稿确认 / 续写 / 局部重写，并为章节生成流创建和更新 `GenerationRecord`
 - `service/metric`：当前仍以接口与依赖声明为主，尚未接入业务采集流程
 
 ## 本地开发（默认 PostgreSQL）
@@ -169,13 +170,15 @@ go test ./...
 
 - 项目 / 资产 / 对话微调 HTTP handler 集成测试（基于内存仓储）
 - Conversation service 单元测试（start / reply / confirm / list）
+- Chapter service 与 handler 测试覆盖当前稿确认、重复确认幂等、未完成草稿拒绝与冲突映射
 - PostgreSQL repository SQL 路径测试（含 `pending_suggestion` 持久化，基于 sqlmock）
 - LLM 配置校验、OpenAI 兼容客户端工厂、Prompt Store 加载与渲染、bootstrap 装配测试
 - 本地 PostgreSQL 运行态验证流程：先执行 `go run ./cmd/migrate -config configs/config.yaml`，再启动 `go run ./cmd/server -config configs/config.yaml`
 
 ## 当前刻意保留的边界
 
-- 项目 / 资产 CRUD、Project / Asset 对话微调，以及章节生成 / 续写 / 局部重写链路已完成；章节生成流会创建并持久化 `GenerationRecord`
-- `Chapter` 模型与 HTTP 响应中已包含 `current_draft_id`、`current_draft_confirmed_at`、`current_draft_confirmed_by` 字段，但显式的“确认当前稿”业务流与 API 尚未实现
+- 项目 / 资产 CRUD、Project / Asset 对话微调，以及章节生成 / 当前稿确认 / 续写 / 局部重写链路已完成；章节生成流会创建并持久化 `GenerationRecord`
+- `POST /api/v1/chapters/:chapterID/confirm` 已实现显式的“确认当前稿”业务流；请求需通过 `X-User-ID` 请求头传入合法 UUID，系统会把该值写入 `current_draft_confirmed_by`
+- 当前稿确认仅允许作用于 `current_draft_id` 指向且状态为 `succeeded` 的生成记录；同一草稿重复确认保持幂等；若章节在确认期间被续写/改写并更新，则返回冲突错误提示重试
 - 直接通过 `cmd/server` 启动 `postgres` 模式服务时不会自动执行 migration；如需自动执行可使用 `scripts/run-local.sh`
 - `memory` provider 仍然保留，但目标是用于测试而不是默认运行态持久化
