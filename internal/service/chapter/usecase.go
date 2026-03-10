@@ -332,7 +332,7 @@ func (u *useCase) Rewrite(ctx context.Context, params RewriteParams) (*RewriteRe
 		return nil, translatedErr
 	}
 	expectedUpdatedAt := chapterEntity.UpdatedAt
-	if !strings.Contains(chapterEntity.Content, params.TargetText) {
+	if !strings.Contains(chapterEntity.Content, trimmedTargetText) {
 		err := appservice.WrapInvalidInput(fmt.Errorf("target_text must exactly match existing chapter content"))
 		u.trackOperationFailed(ctx, chapterEntity.ProjectID, chapterEntity.ID, "rewrite", generationdomain.KindChapterRewrite, startedAt, 0, err)
 		return nil, err
@@ -571,6 +571,7 @@ func buildContinuePromptData(projectEntity *projectdomain.Project, promptContext
 }
 
 func buildRewritePromptData(projectEntity *projectdomain.Project, promptContext chapterPromptContext, chapterEntity *chapterdomain.Chapter, params RewriteParams) map[string]string {
+	trimmedTargetText := strings.TrimSpace(params.TargetText)
 	return map[string]string{
 		"ProjectTitle":          projectEntity.Title,
 		"ProjectSummary":        projectEntity.Summary,
@@ -580,7 +581,7 @@ func buildRewritePromptData(projectEntity *projectdomain.Project, promptContext 
 		"WorldbuildingContext":  promptContext.WorldbuildingContext,
 		"CharacterContext":      promptContext.CharacterContext,
 		"CurrentChapterContent": chapterEntity.Content,
-		"TargetText":            params.TargetText,
+		"TargetText":            trimmedTargetText,
 		"Instruction":           params.Instruction,
 	}
 }
