@@ -1,6 +1,9 @@
 package conversation
 
-import "context"
+import (
+	"context"
+	"time"
+)
 
 // AppendMessageParams 定义附加单条消息所需的输入参数。
 type AppendMessageParams struct {
@@ -29,6 +32,8 @@ type ConversationRepository interface {
 	Create(ctx context.Context, conversation *Conversation) error
 	GetByID(ctx context.Context, id string) (*Conversation, error)
 	Update(ctx context.Context, conversation *Conversation) error
+	// UpdateIfUnchanged 使用 optimistic locking 避免并发请求覆盖最新对话状态。
+	UpdateIfUnchanged(ctx context.Context, conversation *Conversation, expectedUpdatedAt time.Time) (bool, error)
 	AppendMessage(ctx context.Context, params AppendMessageParams) error
 	ListByProject(ctx context.Context, params ListByProjectParams) ([]*Conversation, error)
 	ListByTarget(ctx context.Context, params ListByTargetParams) ([]*Conversation, error)

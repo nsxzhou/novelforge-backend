@@ -193,6 +193,54 @@ func TestProjectRepositoryUpdateMapsNotFound(t *testing.T) {
 	}
 }
 
+func TestProjectRepositoryUpdateIfUnchanged(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock.New() error = %v", err)
+	}
+	defer db.Close()
+
+	repo := NewProjectRepository(db)
+	now := postgresTestTime()
+	entity := newTestProjectEntity(now)
+	entity.Title = "Novel Revised"
+	entity.Summary = "Updated summary"
+	entity.Status = projectdomain.StatusActive
+	entity.UpdatedAt = now.Add(time.Minute)
+
+	mock.ExpectExec(regexp.QuoteMeta(`
+		UPDATE projects
+		SET title = $2, summary = $3, status = $4, updated_at = $5
+		WHERE id = $1 AND updated_at = $6
+	`)).WithArgs(entity.ID, entity.Title, entity.Summary, entity.Status, entity.UpdatedAt, now).WillReturnResult(sqlmock.NewResult(0, 1))
+
+	updated, err := repo.UpdateIfUnchanged(context.Background(), entity, now)
+	if err != nil {
+		t.Fatalf("UpdateIfUnchanged() error = %v", err)
+	}
+	if !updated {
+		t.Fatal("UpdateIfUnchanged() updated = false, want true")
+	}
+
+	mock.ExpectExec(regexp.QuoteMeta(`
+		UPDATE projects
+		SET title = $2, summary = $3, status = $4, updated_at = $5
+		WHERE id = $1 AND updated_at = $6
+	`)).WithArgs(entity.ID, entity.Title, entity.Summary, entity.Status, entity.UpdatedAt, now.Add(2*time.Minute)).WillReturnResult(sqlmock.NewResult(0, 0))
+
+	updated, err = repo.UpdateIfUnchanged(context.Background(), entity, now.Add(2*time.Minute))
+	if err != nil {
+		t.Fatalf("UpdateIfUnchanged() stale error = %v", err)
+	}
+	if updated {
+		t.Fatal("UpdateIfUnchanged() updated = true, want false")
+	}
+
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("sql expectations not met: %v", err)
+	}
+}
+
 func TestProjectRepositoryCreateMapsAlreadyExists(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	if err != nil {
@@ -390,6 +438,54 @@ func TestAssetRepositoryUpdateMapsNotFound(t *testing.T) {
 	if err != shared.ErrNotFound {
 		t.Fatalf("Update() error = %v, want %v", err, shared.ErrNotFound)
 	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("sql expectations not met: %v", err)
+	}
+}
+
+func TestAssetRepositoryUpdateIfUnchanged(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock.New() error = %v", err)
+	}
+	defer db.Close()
+
+	repo := NewAssetRepository(db)
+	now := postgresTestTime()
+	entity := newTestAssetEntity(now)
+	entity.Type = assetdomain.TypeCharacter
+	entity.Title = "Hero"
+	entity.Content = "Character sheet"
+	entity.UpdatedAt = now.Add(time.Minute)
+
+	mock.ExpectExec(regexp.QuoteMeta(`
+		UPDATE assets
+		SET type = $2, title = $3, content = $4, updated_at = $5
+		WHERE id = $1 AND updated_at = $6
+	`)).WithArgs(entity.ID, entity.Type, entity.Title, entity.Content, entity.UpdatedAt, now).WillReturnResult(sqlmock.NewResult(0, 1))
+
+	updated, err := repo.UpdateIfUnchanged(context.Background(), entity, now)
+	if err != nil {
+		t.Fatalf("UpdateIfUnchanged() error = %v", err)
+	}
+	if !updated {
+		t.Fatal("UpdateIfUnchanged() updated = false, want true")
+	}
+
+	mock.ExpectExec(regexp.QuoteMeta(`
+		UPDATE assets
+		SET type = $2, title = $3, content = $4, updated_at = $5
+		WHERE id = $1 AND updated_at = $6
+	`)).WithArgs(entity.ID, entity.Type, entity.Title, entity.Content, entity.UpdatedAt, now.Add(2*time.Minute)).WillReturnResult(sqlmock.NewResult(0, 0))
+
+	updated, err = repo.UpdateIfUnchanged(context.Background(), entity, now.Add(2*time.Minute))
+	if err != nil {
+		t.Fatalf("UpdateIfUnchanged() stale error = %v", err)
+	}
+	if updated {
+		t.Fatal("UpdateIfUnchanged() updated = true, want false")
+	}
+
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Fatalf("sql expectations not met: %v", err)
 	}
@@ -603,6 +699,65 @@ func TestConversationRepositoryAppendMessage(t *testing.T) {
 
 	if err := repo.AppendMessage(context.Background(), conversationdomain.AppendMessageParams{ConversationID: conversationID, Message: message2}); err != nil {
 		t.Fatalf("AppendMessage() error = %v", err)
+	}
+}
+
+func TestConversationRepositoryUpdateIfUnchanged(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock.New() error = %v", err)
+	}
+	defer db.Close()
+
+	repo := NewConversationRepository(db)
+	now := postgresTestTime()
+	entity := &conversationdomain.Conversation{
+		ID:         uuid.NewString(),
+		ProjectID:  uuid.NewString(),
+		TargetType: conversationdomain.TargetTypeProject,
+		TargetID:   uuid.NewString(),
+		Messages: []conversationdomain.Message{
+			{
+				ID:        uuid.NewString(),
+				Role:      conversationdomain.MessageRoleUser,
+				Content:   "Hello",
+				CreatedAt: now,
+			},
+		},
+		CreatedAt: now,
+		UpdatedAt: now.Add(time.Minute),
+	}
+
+	mock.ExpectExec(regexp.QuoteMeta(`
+		UPDATE conversations
+		SET messages = $2::jsonb, pending_suggestion = $3::jsonb, updated_at = $4
+		WHERE id = $1 AND updated_at = $5
+	`)).WithArgs(entity.ID, sqlmock.AnyArg(), sqlmock.AnyArg(), entity.UpdatedAt, now).WillReturnResult(sqlmock.NewResult(0, 1))
+
+	updated, err := repo.UpdateIfUnchanged(context.Background(), entity, now)
+	if err != nil {
+		t.Fatalf("UpdateIfUnchanged() error = %v", err)
+	}
+	if !updated {
+		t.Fatal("UpdateIfUnchanged() updated = false, want true")
+	}
+
+	mock.ExpectExec(regexp.QuoteMeta(`
+		UPDATE conversations
+		SET messages = $2::jsonb, pending_suggestion = $3::jsonb, updated_at = $4
+		WHERE id = $1 AND updated_at = $5
+	`)).WithArgs(entity.ID, sqlmock.AnyArg(), sqlmock.AnyArg(), entity.UpdatedAt, now.Add(2*time.Minute)).WillReturnResult(sqlmock.NewResult(0, 0))
+
+	updated, err = repo.UpdateIfUnchanged(context.Background(), entity, now.Add(2*time.Minute))
+	if err != nil {
+		t.Fatalf("UpdateIfUnchanged() stale error = %v", err)
+	}
+	if updated {
+		t.Fatal("UpdateIfUnchanged() updated = true, want false")
+	}
+
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("sql expectations not met: %v", err)
 	}
 }
 

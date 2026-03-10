@@ -137,6 +137,46 @@ func TestProjectRepositoryCRUD(t *testing.T) {
 	}
 }
 
+func TestProjectRepositoryUpdateIfUnchanged(t *testing.T) {
+	repo := NewProjectRepository()
+	ctx := context.Background()
+	project := testProject()
+
+	if err := repo.Create(ctx, project); err != nil {
+		t.Fatalf("Create() error = %v", err)
+	}
+
+	expectedUpdatedAt := project.UpdatedAt
+	project.Title = "Updated Title"
+	project.UpdatedAt = project.UpdatedAt.Add(time.Minute)
+
+	updated, err := repo.UpdateIfUnchanged(ctx, project, expectedUpdatedAt)
+	if err != nil {
+		t.Fatalf("UpdateIfUnchanged() error = %v", err)
+	}
+	if !updated {
+		t.Fatal("UpdateIfUnchanged() updated = false, want true")
+	}
+
+	got, err := repo.GetByID(ctx, project.ID)
+	if err != nil {
+		t.Fatalf("GetByID() error = %v", err)
+	}
+	if got.Title != "Updated Title" {
+		t.Fatalf("GetByID().Title = %q, want %q", got.Title, "Updated Title")
+	}
+
+	project.Title = "Stale Title"
+	project.UpdatedAt = project.UpdatedAt.Add(time.Minute)
+	updated, err = repo.UpdateIfUnchanged(ctx, project, expectedUpdatedAt)
+	if err != nil {
+		t.Fatalf("UpdateIfUnchanged() stale error = %v", err)
+	}
+	if updated {
+		t.Fatal("UpdateIfUnchanged() updated = true, want false")
+	}
+}
+
 func TestAssetRepositoryFiltersAndDelete(t *testing.T) {
 	repo := NewAssetRepository()
 	ctx := context.Background()
@@ -171,6 +211,45 @@ func TestAssetRepositoryFiltersAndDelete(t *testing.T) {
 	}
 	if len(remaining) != 1 || remaining[0].ID != character.ID {
 		t.Fatalf("ListByProject() = %#v, want only remaining asset", remaining)
+	}
+}
+
+func TestAssetRepositoryUpdateIfUnchanged(t *testing.T) {
+	repo := NewAssetRepository()
+	ctx := context.Background()
+	projectID := uuid.NewString()
+	entity := testAsset(projectID)
+	if err := repo.Create(ctx, entity); err != nil {
+		t.Fatalf("Create() error = %v", err)
+	}
+
+	expectedUpdatedAt := entity.UpdatedAt
+	entity.Title = "Updated Outline"
+	entity.UpdatedAt = entity.UpdatedAt.Add(time.Minute)
+	updated, err := repo.UpdateIfUnchanged(ctx, entity, expectedUpdatedAt)
+	if err != nil {
+		t.Fatalf("UpdateIfUnchanged() error = %v", err)
+	}
+	if !updated {
+		t.Fatal("UpdateIfUnchanged() updated = false, want true")
+	}
+
+	got, err := repo.GetByID(ctx, entity.ID)
+	if err != nil {
+		t.Fatalf("GetByID() error = %v", err)
+	}
+	if got.Title != "Updated Outline" {
+		t.Fatalf("GetByID().Title = %q, want %q", got.Title, "Updated Outline")
+	}
+
+	entity.Title = "Stale Update"
+	entity.UpdatedAt = entity.UpdatedAt.Add(time.Minute)
+	updated, err = repo.UpdateIfUnchanged(ctx, entity, expectedUpdatedAt)
+	if err != nil {
+		t.Fatalf("UpdateIfUnchanged() stale error = %v", err)
+	}
+	if updated {
+		t.Fatal("UpdateIfUnchanged() updated = true, want false")
 	}
 }
 
@@ -267,6 +346,52 @@ func TestConversationRepositoryAppendMessage(t *testing.T) {
 	}
 	if got.Messages[1].Content != message.Content {
 		t.Fatalf("Messages[1].Content = %q, want %q", got.Messages[1].Content, message.Content)
+	}
+}
+
+func TestConversationRepositoryUpdateIfUnchanged(t *testing.T) {
+	repo := NewConversationRepository()
+	ctx := context.Background()
+	projectID := uuid.NewString()
+	conversation := testConversation(projectID, uuid.NewString())
+	if err := repo.Create(ctx, conversation); err != nil {
+		t.Fatalf("Create() error = %v", err)
+	}
+
+	expectedUpdatedAt := conversation.UpdatedAt
+	updatedConversation := *conversation
+	if err := updatedConversation.AppendMessage(conversationdomain.Message{
+		ID:        uuid.NewString(),
+		Role:      conversationdomain.MessageRoleAssistant,
+		Content:   "Updated message",
+		CreatedAt: expectedUpdatedAt.Add(time.Minute),
+	}); err != nil {
+		t.Fatalf("AppendMessage() error = %v", err)
+	}
+
+	updated, err := repo.UpdateIfUnchanged(ctx, &updatedConversation, expectedUpdatedAt)
+	if err != nil {
+		t.Fatalf("UpdateIfUnchanged() error = %v", err)
+	}
+	if !updated {
+		t.Fatal("UpdateIfUnchanged() updated = false, want true")
+	}
+
+	got, err := repo.GetByID(ctx, conversation.ID)
+	if err != nil {
+		t.Fatalf("GetByID() error = %v", err)
+	}
+	if len(got.Messages) != 2 {
+		t.Fatalf("len(Messages) = %d, want 2", len(got.Messages))
+	}
+
+	updatedConversation.UpdatedAt = updatedConversation.UpdatedAt.Add(time.Minute)
+	updated, err = repo.UpdateIfUnchanged(ctx, &updatedConversation, expectedUpdatedAt)
+	if err != nil {
+		t.Fatalf("UpdateIfUnchanged() stale error = %v", err)
+	}
+	if updated {
+		t.Fatal("UpdateIfUnchanged() updated = true, want false")
 	}
 }
 

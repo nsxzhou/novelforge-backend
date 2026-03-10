@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"sync"
+	"time"
 
 	"novelforge/backend/internal/domain/asset"
 )
@@ -107,6 +108,32 @@ func (r *AssetRepository) Update(_ context.Context, entity *asset.Asset) error {
 
 	r.items[entity.ID] = cloneAsset(entity)
 	return nil
+}
+
+func (r *AssetRepository) UpdateIfUnchanged(_ context.Context, entity *asset.Asset, expectedUpdatedAt time.Time) (bool, error) {
+	if entity == nil {
+		return false, fmt.Errorf("asset must not be nil")
+	}
+	if err := entity.Validate(); err != nil {
+		return false, err
+	}
+	if expectedUpdatedAt.IsZero() {
+		return false, fmt.Errorf("expected_updated_at must not be zero")
+	}
+
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	current, exists := r.items[entity.ID]
+	if !exists {
+		return false, ErrNotFound
+	}
+	if !current.UpdatedAt.Equal(expectedUpdatedAt) {
+		return false, nil
+	}
+
+	r.items[entity.ID] = cloneAsset(entity)
+	return true, nil
 }
 
 func (r *AssetRepository) Delete(_ context.Context, id string) error {

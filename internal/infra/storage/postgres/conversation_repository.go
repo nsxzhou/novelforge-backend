@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"time"
 
 	conversationdomain "novelforge/backend/internal/domain/conversation"
 )
@@ -95,6 +96,41 @@ func (r *ConversationRepository) Update(ctx context.Context, entity *conversatio
 		return mapExecError(err)
 	}
 	return ensureRowsAffected(result)
+}
+
+func (r *ConversationRepository) UpdateIfUnchanged(ctx context.Context, entity *conversationdomain.Conversation, expectedUpdatedAt time.Time) (bool, error) {
+	if entity == nil {
+		return false, fmt.Errorf("conversation must not be nil")
+	}
+	if err := entity.Validate(); err != nil {
+		return false, err
+	}
+	if expectedUpdatedAt.IsZero() {
+		return false, fmt.Errorf("expected_updated_at must not be zero")
+	}
+
+	messages, err := marshalJSON(entity.Messages)
+	if err != nil {
+		return false, err
+	}
+	pendingSuggestion, err := marshalJSON(entity.PendingSuggestion)
+	if err != nil {
+		return false, err
+	}
+	result, err := r.db.ExecContext(ctx, `
+		UPDATE conversations
+		SET messages = $2::jsonb, pending_suggestion = $3::jsonb, updated_at = $4
+		WHERE id = $1 AND updated_at = $5
+	`, entity.ID, messages, pendingSuggestion, entity.UpdatedAt, expectedUpdatedAt)
+	if err != nil {
+		return false, mapExecError(err)
+	}
+
+	rowsAffected, err := result.RowsAffected()
+	if err != nil {
+		return false, err
+	}
+	return rowsAffected > 0, nil
 }
 
 func (r *ConversationRepository) AppendMessage(ctx context.Context, params conversationdomain.AppendMessageParams) error {

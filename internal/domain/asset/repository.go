@@ -1,6 +1,9 @@
 package asset
 
-import "context"
+import (
+	"context"
+	"time"
+)
 
 // ListByProjectParams 定义项目下的资产(asset)过滤器。
 type ListByProjectParams struct {
@@ -24,5 +27,7 @@ type AssetRepository interface {
 	ListByProject(ctx context.Context, params ListByProjectParams) ([]*Asset, error)
 	ListByProjectAndType(ctx context.Context, params ListByProjectAndTypeParams) ([]*Asset, error)
 	Update(ctx context.Context, asset *Asset) error
+	// UpdateIfUnchanged 使用 optimistic locking 避免并发请求覆盖最新资产状态。
+	UpdateIfUnchanged(ctx context.Context, asset *Asset, expectedUpdatedAt time.Time) (bool, error)
 	Delete(ctx context.Context, id string) error
 }

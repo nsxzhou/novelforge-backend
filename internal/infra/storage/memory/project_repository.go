@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"sync"
+	"time"
 
 	"novelforge/backend/internal/domain/project"
 )
@@ -87,4 +88,30 @@ func (r *ProjectRepository) Update(_ context.Context, entity *project.Project) e
 
 	r.items[entity.ID] = cloneProject(entity)
 	return nil
+}
+
+func (r *ProjectRepository) UpdateIfUnchanged(_ context.Context, entity *project.Project, expectedUpdatedAt time.Time) (bool, error) {
+	if entity == nil {
+		return false, fmt.Errorf("project must not be nil")
+	}
+	if err := entity.Validate(); err != nil {
+		return false, err
+	}
+	if expectedUpdatedAt.IsZero() {
+		return false, fmt.Errorf("expected_updated_at must not be zero")
+	}
+
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	current, exists := r.items[entity.ID]
+	if !exists {
+		return false, ErrNotFound
+	}
+	if !current.UpdatedAt.Equal(expectedUpdatedAt) {
+		return false, nil
+	}
+
+	r.items[entity.ID] = cloneProject(entity)
+	return true, nil
 }

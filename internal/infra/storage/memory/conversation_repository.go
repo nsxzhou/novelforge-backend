@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"sync"
+	"time"
 
 	"novelforge/backend/internal/domain/conversation"
 )
@@ -69,6 +70,32 @@ func (r *ConversationRepository) Update(_ context.Context, entity *conversation.
 	}
 	r.items[entity.ID] = cloneConversation(entity)
 	return nil
+}
+
+func (r *ConversationRepository) UpdateIfUnchanged(_ context.Context, entity *conversation.Conversation, expectedUpdatedAt time.Time) (bool, error) {
+	if entity == nil {
+		return false, fmt.Errorf("conversation must not be nil")
+	}
+	if err := entity.Validate(); err != nil {
+		return false, err
+	}
+	if expectedUpdatedAt.IsZero() {
+		return false, fmt.Errorf("expected_updated_at must not be zero")
+	}
+
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	current, exists := r.items[entity.ID]
+	if !exists {
+		return false, ErrNotFound
+	}
+	if !current.UpdatedAt.Equal(expectedUpdatedAt) {
+		return false, nil
+	}
+
+	r.items[entity.ID] = cloneConversation(entity)
+	return true, nil
 }
 
 func (r *ConversationRepository) AppendMessage(_ context.Context, params conversation.AppendMessageParams) error {

@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"time"
 
 	assetdomain "novelforge/backend/internal/domain/asset"
 )
@@ -95,6 +96,33 @@ func (r *AssetRepository) Update(ctx context.Context, entity *assetdomain.Asset)
 		return mapExecError(err)
 	}
 	return ensureRowsAffected(result)
+}
+
+func (r *AssetRepository) UpdateIfUnchanged(ctx context.Context, entity *assetdomain.Asset, expectedUpdatedAt time.Time) (bool, error) {
+	if entity == nil {
+		return false, fmt.Errorf("asset must not be nil")
+	}
+	if err := entity.Validate(); err != nil {
+		return false, err
+	}
+	if expectedUpdatedAt.IsZero() {
+		return false, fmt.Errorf("expected_updated_at must not be zero")
+	}
+
+	result, err := r.db.ExecContext(ctx, `
+		UPDATE assets
+		SET type = $2, title = $3, content = $4, updated_at = $5
+		WHERE id = $1 AND updated_at = $6
+	`, entity.ID, entity.Type, entity.Title, entity.Content, entity.UpdatedAt, expectedUpdatedAt)
+	if err != nil {
+		return false, mapExecError(err)
+	}
+
+	rowsAffected, err := result.RowsAffected()
+	if err != nil {
+		return false, err
+	}
+	return rowsAffected > 0, nil
 }
 
 func (r *AssetRepository) Delete(ctx context.Context, id string) error {
