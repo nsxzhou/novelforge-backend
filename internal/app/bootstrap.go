@@ -1,6 +1,7 @@
 package app
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"strings"
@@ -21,6 +22,7 @@ import (
 
 var (
 	newRepositories   = storage.NewRepositories
+	runMigrations     = storage.RunMigrations
 	newLLMClient      = llm.NewClient
 	loadPromptStore   = prompts.LoadStore
 	closeRepositories = func(repositories *storage.Repositories) error {
@@ -46,6 +48,9 @@ func LoadBootstrap(configPath string) (*Bootstrap, error) {
 	if err != nil {
 		return nil, fmt.Errorf("load config: %w", err)
 	}
+	if err := runMigrations(context.Background(), cfg.Storage); err != nil {
+		return nil, fmt.Errorf("run migrations: %w", err)
+	}
 
 	repositories, err := newRepositories(cfg.Storage)
 	if err != nil {
@@ -70,13 +75,17 @@ func LoadBootstrap(configPath string) (*Bootstrap, error) {
 		return nil, fmt.Errorf("load prompt store: %w", err)
 	}
 
-	projectUseCase := projectservice.NewUseCase(projectservice.Dependencies{Projects: repositories.Projects})
-	assetUseCase := assetservice.NewUseCase(assetservice.Dependencies{
-		Assets:   repositories.Assets,
-		Projects: repositories.Projects,
-	})
 	metricUseCase := metricservice.NewUseCase(metricservice.Dependencies{
 		MetricEvents: repositories.MetricEvents,
+	})
+	projectUseCase := projectservice.NewUseCase(projectservice.Dependencies{Projects: repositories.Projects})
+	assetUseCase := assetservice.NewUseCase(assetservice.Dependencies{
+		Assets:            repositories.Assets,
+		Projects:          repositories.Projects,
+		GenerationRecords: repositories.GenerationRecords,
+		LLMClient:         llmClient,
+		PromptStore:       promptStore,
+		Metrics:           metricUseCase,
 	})
 	chapterUseCase := chapterservice.NewUseCase(chapterservice.Dependencies{
 		Chapters:          repositories.Chapters,

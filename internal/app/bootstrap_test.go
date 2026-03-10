@@ -1,6 +1,7 @@
 package app
 
 import (
+	"context"
 	"errors"
 	"os"
 	"path/filepath"
@@ -96,6 +97,10 @@ func TestLoadBootstrapPromptStoreErrorClosesRepositories(t *testing.T) {
 
 	t.Setenv(apiKeyEnv, "test-key")
 
+	previousRunMigrations := runMigrations
+	runMigrations = func(context.Context, config.StorageConfig) error { return nil }
+	defer func() { runMigrations = previousRunMigrations }()
+
 	repositories := &storage.Repositories{}
 	previousNewRepositories := newRepositories
 	newRepositories = func(_ config.StorageConfig) (*storage.Repositories, error) {
@@ -147,6 +152,10 @@ func TestLoadBootstrapSuccessWiresPromptStore(t *testing.T) {
 
 	t.Setenv(apiKeyEnv, "test-key")
 
+	previousRunMigrations := runMigrations
+	runMigrations = func(context.Context, config.StorageConfig) error { return nil }
+	defer func() { runMigrations = previousRunMigrations }()
+
 	configPath := writeTestConfig(t, validLLMConfigBlock(apiKeyEnv))
 	bootstrap, err := LoadBootstrap(configPath)
 	if err != nil {
@@ -165,5 +174,82 @@ func TestLoadBootstrapSuccessWiresPromptStore(t *testing.T) {
 	}
 	if _, ok := bootstrap.PromptStore.Get("project_refinement"); !ok {
 		t.Fatal("PromptStore.Get(project_refinement) = false, want true")
+	}
+}
+
+func TestLoadBootstrapRunMigrationsError(t *testing.T) {
+	const apiKeyEnv = "NOVELFORGE_LLM_API_KEY_BOOTSTRAP_MIGRATION_ERROR_TEST"
+
+	t.Setenv(apiKeyEnv, "test-key")
+
+	previousRunMigrations := runMigrations
+	runMigrations = func(context.Context, config.StorageConfig) error {
+		return errors.New("migration failed")
+	}
+	defer func() { runMigrations = previousRunMigrations }()
+
+	previousNewRepositories := newRepositories
+	newRepositories = func(config.StorageConfig) (*storage.Repositories, error) {
+		t.Fatal("newRepositories() should not be called when migrations fail")
+		return nil, nil
+	}
+	defer func() { newRepositories = previousNewRepositories }()
+
+	configPath := writeTestConfig(t, validLLMConfigBlock(apiKeyEnv))
+	bootstrap, err := LoadBootstrap(configPath)
+	if err == nil {
+		if bootstrap != nil {
+			_ = bootstrap.Close()
+		}
+		t.Fatal("LoadBootstrap() error = nil, want migration error")
+	}
+	if !strings.Contains(err.Error(), "run migrations: migration failed") {
+		t.Fatalf("LoadBootstrap() error = %v, want migration error", err)
+	}
+}
+
+func TestLoadBootstrapRunsMigrationsBeforeRepositories(t *testing.T) {
+	const apiKeyEnv = "NOVELFORGE_LLM_API_KEY_BOOTSTRAP_MIGRATION_ORDER_TEST"
+
+	t.Setenv(apiKeyEnv, "test-key")
+
+	callOrder := make([]string, 0, 2)
+
+	previousRunMigrations := runMigrations
+	runMigrations = func(context.Context, config.StorageConfig) error {
+		callOrder = append(callOrder, "migrate")
+		return nil
+	}
+	defer func() { runMigrations = previousRunMigrations }()
+
+	previousNewRepositories := newRepositories
+	newRepositories = func(config.StorageConfig) (*storage.Repositories, error) {
+		callOrder = append(callOrder, "repositories")
+		return &storage.Repositories{}, nil
+	}
+	defer func() { newRepositories = previousNewRepositories }()
+
+	previousNewLLMClient := newLLMClient
+	newLLMClient = func(config.LLMConfig) (llm.Client, error) {
+		return &stubLLMClient{}, nil
+	}
+	defer func() { newLLMClient = previousNewLLMClient }()
+
+	previousLoadPromptStore := loadPromptStore
+	loadPromptStore = prompts.LoadStore
+	defer func() { loadPromptStore = previousLoadPromptStore }()
+
+	configPath := writeTestConfig(t, validLLMConfigBlock(apiKeyEnv))
+	bootstrap, err := LoadBootstrap(configPath)
+	if err != nil {
+		t.Fatalf("LoadBootstrap() error = %v", err)
+	}
+	defer bootstrap.Close()
+
+	if len(callOrder) < 2 {
+		t.Fatalf("call order = %#v, want at least migrate then repositories", callOrder)
+	}
+	if callOrder[0] != "migrate" || callOrder[1] != "repositories" {
+		t.Fatalf("call order = %#v, want [migrate repositories ...]", callOrder)
 	}
 }

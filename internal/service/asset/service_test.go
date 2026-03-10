@@ -3,16 +3,24 @@ package asset
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 	"time"
 
+	"github.com/cloudwego/eino/components/model"
+	"github.com/cloudwego/eino/schema"
 	"github.com/google/uuid"
 
 	assetdomain "novelforge/backend/internal/domain/asset"
+	generationdomain "novelforge/backend/internal/domain/generation"
+	metricdomain "novelforge/backend/internal/domain/metric"
 	projectdomain "novelforge/backend/internal/domain/project"
+	"novelforge/backend/internal/infra/llm/prompts"
 	"novelforge/backend/internal/infra/storage"
 	memory "novelforge/backend/internal/infra/storage/memory"
 	appservice "novelforge/backend/internal/service"
+	metricservice "novelforge/backend/internal/service/metric"
+	"novelforge/backend/pkg/config"
 )
 
 func seedProjectForAsset(t *testing.T, repo projectdomain.ProjectRepository) *projectdomain.Project {
@@ -69,8 +77,60 @@ func (assetCreateConflictRepo) ListByProjectAndType(context.Context, assetdomain
 func (assetCreateConflictRepo) Update(context.Context, *assetdomain.Asset) error {
 	return nil
 }
+func (assetCreateConflictRepo) UpdateIfUnchanged(context.Context, *assetdomain.Asset, time.Time) (bool, error) {
+	return false, nil
+}
 func (assetCreateConflictRepo) Delete(context.Context, string) error {
 	return nil
+}
+
+type stubChatModel struct {
+	generate func(context.Context, []*schema.Message, ...model.Option) (*schema.Message, error)
+}
+
+func (s *stubChatModel) Generate(ctx context.Context, input []*schema.Message, opts ...model.Option) (*schema.Message, error) {
+	if s.generate != nil {
+		return s.generate(ctx, input, opts...)
+	}
+	return nil, errors.New("unexpected Generate call")
+}
+
+func (s *stubChatModel) Stream(context.Context, []*schema.Message, ...model.Option) (*schema.StreamReader[*schema.Message], error) {
+	return nil, errors.New("unexpected Stream call")
+}
+
+func (s *stubChatModel) WithTools(_ []*schema.ToolInfo) (model.ToolCallingChatModel, error) {
+	return s, nil
+}
+
+type stubLLMClient struct {
+	chatModel model.ToolCallingChatModel
+}
+
+func (s *stubLLMClient) Provider() string { return "stub" }
+func (s *stubLLMClient) Model() string    { return "stub-model" }
+func (s *stubLLMClient) ChatModel() model.ToolCallingChatModel {
+	return s.chatModel
+}
+
+func loadTestPromptStore(t *testing.T) *prompts.Store {
+	t.Helper()
+	store, err := prompts.LoadStore(config.PromptConfig{
+		"asset_generation":     "asset_generation.yaml",
+		"chapter_generation":   "chapter_generation.yaml",
+		"chapter_continuation": "chapter_continuation.yaml",
+		"chapter_rewrite":      "chapter_rewrite.yaml",
+		"project_refinement":   "project_refinement.yaml",
+		"asset_refinement":     "asset_refinement.yaml",
+	})
+	if err != nil {
+		t.Fatalf("LoadStore() error = %v", err)
+	}
+	return store
+}
+
+func newMetricUseCase(metricRepo metricdomain.MetricEventRepository) metricservice.UseCase {
+	return metricservice.NewUseCase(metricservice.Dependencies{MetricEvents: metricRepo})
 }
 
 func TestCreateAssetTrimsFieldsAndSetsTimestamps(t *testing.T) {
@@ -275,5 +335,141 @@ func TestDeleteAssetConvertsNotFound(t *testing.T) {
 	err := uc.Delete(context.Background(), uuid.NewString())
 	if !errors.Is(err, appservice.ErrNotFound) {
 		t.Fatalf("Delete() error = %v, want ErrNotFound", err)
+	}
+}
+
+func TestGenerateAssetSuccessCreatesGenerationRecordAndMetric(t *testing.T) {
+	projectRepo := memory.NewProjectRepository()
+	project := seedProjectForAsset(t, projectRepo)
+	assetRepo := memory.NewAssetRepository()
+	generationRepo := memory.NewGenerationRecordRepository()
+	metricRepo := memory.NewMetricEventRepository()
+	uc := NewUseCase(Dependencies{
+		Assets:            assetRepo,
+		Projects:          projectRepo,
+		GenerationRecords: generationRepo,
+		LLMClient: &stubLLMClient{
+			chatModel: &stubChatModel{
+				generate: func(context.Context, []*schema.Message, ...model.Option) (*schema.Message, error) {
+					return &schema.Message{Content: `{"title":"新主角设定","content":"沉着冷静，城府极深。"}`}, nil
+				},
+			},
+		},
+		PromptStore: loadTestPromptStore(t),
+		Metrics:     newMetricUseCase(metricRepo),
+	})
+
+	result, err := uc.Generate(context.Background(), GenerateParams{
+		ProjectID:   project.ID,
+		Type:        assetdomain.TypeCharacter,
+		Instruction: "生成一个冷静且有野心的主角设定。",
+	})
+	if err != nil {
+		t.Fatalf("Generate() error = %v", err)
+	}
+	if result == nil || result.Asset == nil || result.GenerationRecord == nil {
+		t.Fatalf("Generate() result = %#v, want non-nil asset and generation record", result)
+	}
+	if result.Asset.ProjectID != project.ID || result.Asset.Type != assetdomain.TypeCharacter {
+		t.Fatalf("generated asset = %#v, want project/type preserved", result.Asset)
+	}
+	if result.GenerationRecord.Kind != generationdomain.KindAssetGeneration || result.GenerationRecord.Status != generationdomain.StatusSucceeded {
+		t.Fatalf("generated record = %#v, want succeeded asset_generation record", result.GenerationRecord)
+	}
+	if result.GenerationRecord.OutputRef != result.Asset.ID {
+		t.Fatalf("generation output_ref = %q, want %q", result.GenerationRecord.OutputRef, result.Asset.ID)
+	}
+
+	storedAsset, err := assetRepo.GetByID(context.Background(), result.Asset.ID)
+	if err != nil {
+		t.Fatalf("GetByID(asset) error = %v", err)
+	}
+	if storedAsset.Title != "新主角设定" || storedAsset.Content != "沉着冷静，城府极深。" {
+		t.Fatalf("stored asset = %#v, want generated title/content", storedAsset)
+	}
+
+	storedRecord, err := generationRepo.GetByID(context.Background(), result.GenerationRecord.ID)
+	if err != nil {
+		t.Fatalf("GetByID(generation) error = %v", err)
+	}
+	if storedRecord.Status != generationdomain.StatusSucceeded {
+		t.Fatalf("stored generation status = %q, want %q", storedRecord.Status, generationdomain.StatusSucceeded)
+	}
+
+	events, err := metricRepo.ListByProject(context.Background(), metricdomain.ListByProjectParams{
+		ProjectID: project.ID,
+		EventName: metricdomain.EventOperationCompleted,
+	})
+	if err != nil {
+		t.Fatalf("ListByProject(metric) error = %v", err)
+	}
+	if len(events) != 1 {
+		t.Fatalf("len(metric events) = %d, want 1", len(events))
+	}
+	if events[0].Labels["domain"] != "asset" || events[0].Labels["action"] != "generate" {
+		t.Fatalf("metric labels = %#v, want asset/generate", events[0].Labels)
+	}
+	if events[0].Labels["generation_kind"] != generationdomain.KindAssetGeneration || events[0].Labels["asset_type"] != assetdomain.TypeCharacter {
+		t.Fatalf("metric labels = %#v, want generation kind and asset type", events[0].Labels)
+	}
+}
+
+func TestGenerateAssetInvalidJSONMarksGenerationFailed(t *testing.T) {
+	projectRepo := memory.NewProjectRepository()
+	project := seedProjectForAsset(t, projectRepo)
+	generationRepo := memory.NewGenerationRecordRepository()
+	metricRepo := memory.NewMetricEventRepository()
+	uc := NewUseCase(Dependencies{
+		Assets:            memory.NewAssetRepository(),
+		Projects:          projectRepo,
+		GenerationRecords: generationRepo,
+		LLMClient: &stubLLMClient{
+			chatModel: &stubChatModel{
+				generate: func(context.Context, []*schema.Message, ...model.Option) (*schema.Message, error) {
+					return &schema.Message{Content: "not json"}, nil
+				},
+			},
+		},
+		PromptStore: loadTestPromptStore(t),
+		Metrics:     newMetricUseCase(metricRepo),
+	})
+
+	_, err := uc.Generate(context.Background(), GenerateParams{
+		ProjectID:   project.ID,
+		Type:        assetdomain.TypeOutline,
+		Instruction: "生成一份剧情大纲。",
+	})
+	if !errors.Is(err, appservice.ErrInvalidInput) {
+		t.Fatalf("Generate() error = %v, want ErrInvalidInput", err)
+	}
+
+	records, listErr := generationRepo.ListByProject(context.Background(), generationdomain.ListByProjectParams{
+		ProjectID: project.ID,
+	})
+	if listErr != nil {
+		t.Fatalf("ListByProject(generation) error = %v", listErr)
+	}
+	if len(records) != 1 {
+		t.Fatalf("len(generation records) = %d, want 1", len(records))
+	}
+	if records[0].Status != generationdomain.StatusFailed {
+		t.Fatalf("generation status = %q, want %q", records[0].Status, generationdomain.StatusFailed)
+	}
+	if !strings.Contains(records[0].ErrorMessage, "invalid llm json") {
+		t.Fatalf("generation error_message = %q, want invalid llm json", records[0].ErrorMessage)
+	}
+
+	events, metricErr := metricRepo.ListByProject(context.Background(), metricdomain.ListByProjectParams{
+		ProjectID: project.ID,
+		EventName: metricdomain.EventOperationFailed,
+	})
+	if metricErr != nil {
+		t.Fatalf("ListByProject(metric) error = %v", metricErr)
+	}
+	if len(events) != 1 {
+		t.Fatalf("len(failed metric events) = %d, want 1", len(events))
+	}
+	if events[0].Labels["error_kind"] != "invalid_input" {
+		t.Fatalf("metric labels = %#v, want invalid_input error_kind", events[0].Labels)
 	}
 }
