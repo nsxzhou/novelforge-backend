@@ -2,7 +2,9 @@ package chapter
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"log"
 	"strconv"
 	"strings"
 	"time"
@@ -10,10 +12,12 @@ import (
 	assetdomain "novelforge/backend/internal/domain/asset"
 	chapterdomain "novelforge/backend/internal/domain/chapter"
 	generationdomain "novelforge/backend/internal/domain/generation"
+	metricdomain "novelforge/backend/internal/domain/metric"
 	projectdomain "novelforge/backend/internal/domain/project"
 	"novelforge/backend/internal/infra/llm"
 	"novelforge/backend/internal/infra/llm/prompts"
 	appservice "novelforge/backend/internal/service"
+	metricservice "novelforge/backend/internal/service/metric"
 
 	"github.com/cloudwego/eino/schema"
 	"github.com/google/uuid"
@@ -26,6 +30,7 @@ type useCase struct {
 	generationRecords generationdomain.GenerationRecordRepository
 	llmClient         llm.Client
 	promptStore       *prompts.Store
+	metrics           metricservice.UseCase
 }
 
 // NewUseCase 创建章节(chapter)用例实现。
@@ -37,6 +42,7 @@ func NewUseCase(deps Dependencies) UseCase {
 		generationRecords: deps.GenerationRecords,
 		llmClient:         deps.LLMClient,
 		promptStore:       deps.PromptStore,
+		metrics:           deps.Metrics,
 	}
 }
 
@@ -146,6 +152,7 @@ func (u *useCase) Update(ctx context.Context, entity *chapterdomain.Chapter) err
 }
 
 func (u *useCase) Generate(ctx context.Context, params GenerateParams) (*GenerateResult, error) {
+	startedAt := time.Now().UTC()
 	params.ProjectID = strings.TrimSpace(params.ProjectID)
 	params.Title = strings.TrimSpace(params.Title)
 	params.Instruction = strings.TrimSpace(params.Instruction)
@@ -154,34 +161,44 @@ func (u *useCase) Generate(ctx context.Context, params GenerateParams) (*Generat
 		return nil, err
 	}
 	if params.Title == "" {
-		return nil, appservice.WrapInvalidInput(fmt.Errorf("title must not be empty"))
+		err := appservice.WrapInvalidInput(fmt.Errorf("title must not be empty"))
+		u.trackOperationFailed(ctx, params.ProjectID, "", "generate", generationdomain.KindChapterGeneration, startedAt, 0, err)
+		return nil, err
 	}
 	if params.Ordinal <= 0 {
-		return nil, appservice.WrapInvalidInput(fmt.Errorf("ordinal must be greater than 0"))
+		err := appservice.WrapInvalidInput(fmt.Errorf("ordinal must be greater than 0"))
+		u.trackOperationFailed(ctx, params.ProjectID, "", "generate", generationdomain.KindChapterGeneration, startedAt, 0, err)
+		return nil, err
 	}
 	if params.Instruction == "" {
-		return nil, appservice.WrapInvalidInput(fmt.Errorf("instruction must not be empty"))
+		err := appservice.WrapInvalidInput(fmt.Errorf("instruction must not be empty"))
+		u.trackOperationFailed(ctx, params.ProjectID, "", "generate", generationdomain.KindChapterGeneration, startedAt, 0, err)
+		return nil, err
 	}
 
 	projectEntity, promptContext, err := u.loadProjectAndPromptContext(ctx, params.ProjectID)
 	if err != nil {
+		u.trackOperationFailed(ctx, params.ProjectID, "", "generate", generationdomain.KindChapterGeneration, startedAt, 0, err)
 		return nil, err
 	}
 	if err := u.ensureOrdinalAvailable(ctx, params.ProjectID, params.Ordinal, ""); err != nil {
+		u.trackOperationFailed(ctx, params.ProjectID, "", "generate", generationdomain.KindChapterGeneration, startedAt, 0, err)
 		return nil, err
 	}
 
 	systemPrompt, userPrompt, err := u.renderPrompt(generationdomain.KindChapterGeneration, buildGeneratePromptData(projectEntity, promptContext, params))
 	if err != nil {
+		u.trackOperationFailed(ctx, params.ProjectID, "", "generate", generationdomain.KindChapterGeneration, startedAt, 0, err)
 		return nil, err
 	}
 
 	chapterID := uuid.NewString()
 	recordID := uuid.NewString()
-	startedAt := time.Now().UTC()
 	record := newGenerationRecord(recordID, params.ProjectID, chapterID, generationdomain.KindChapterGeneration, buildPromptSnapshot(systemPrompt, userPrompt), startedAt)
 	if err := u.generationRecords.Create(ctx, record); err != nil {
-		return nil, appservice.TranslateStorageError(err)
+		translatedErr := appservice.TranslateStorageError(err)
+		u.trackOperationFailed(ctx, params.ProjectID, chapterID, "generate", generationdomain.KindChapterGeneration, startedAt, 0, translatedErr)
+		return nil, translatedErr
 	}
 
 	content, err := u.generateContent(ctx, systemPrompt, userPrompt)
@@ -217,36 +234,45 @@ func (u *useCase) Generate(ctx context.Context, params GenerateParams) (*Generat
 }
 
 func (u *useCase) Continue(ctx context.Context, params ContinueParams) (*ContinueResult, error) {
+	startedAt := time.Now().UTC()
 	params.ChapterID = strings.TrimSpace(params.ChapterID)
 	params.Instruction = strings.TrimSpace(params.Instruction)
 
 	if err := validateChapterID(params.ChapterID); err != nil {
+		u.trackOperationFailed(ctx, "", params.ChapterID, "continue", generationdomain.KindChapterContinuation, startedAt, 0, err)
 		return nil, err
 	}
 	if params.Instruction == "" {
-		return nil, appservice.WrapInvalidInput(fmt.Errorf("instruction must not be empty"))
+		err := appservice.WrapInvalidInput(fmt.Errorf("instruction must not be empty"))
+		u.trackOperationFailed(ctx, "", params.ChapterID, "continue", generationdomain.KindChapterContinuation, startedAt, 0, err)
+		return nil, err
 	}
 
 	chapterEntity, err := u.chapters.GetByID(ctx, params.ChapterID)
 	if err != nil {
-		return nil, appservice.TranslateStorageError(err)
+		translatedErr := appservice.TranslateStorageError(err)
+		u.trackOperationFailed(ctx, "", params.ChapterID, "continue", generationdomain.KindChapterContinuation, startedAt, 0, translatedErr)
+		return nil, translatedErr
 	}
 	expectedUpdatedAt := chapterEntity.UpdatedAt
 	projectEntity, promptContext, err := u.loadProjectAndPromptContext(ctx, chapterEntity.ProjectID)
 	if err != nil {
+		u.trackOperationFailed(ctx, chapterEntity.ProjectID, chapterEntity.ID, "continue", generationdomain.KindChapterContinuation, startedAt, 0, err)
 		return nil, err
 	}
 
 	systemPrompt, userPrompt, err := u.renderPrompt(generationdomain.KindChapterContinuation, buildContinuePromptData(projectEntity, promptContext, chapterEntity, params))
 	if err != nil {
+		u.trackOperationFailed(ctx, chapterEntity.ProjectID, chapterEntity.ID, "continue", generationdomain.KindChapterContinuation, startedAt, 0, err)
 		return nil, err
 	}
 
 	recordID := uuid.NewString()
-	startedAt := time.Now().UTC()
 	record := newGenerationRecord(recordID, chapterEntity.ProjectID, chapterEntity.ID, generationdomain.KindChapterContinuation, buildPromptSnapshot(systemPrompt, userPrompt), startedAt)
 	if err := u.generationRecords.Create(ctx, record); err != nil {
-		return nil, appservice.TranslateStorageError(err)
+		translatedErr := appservice.TranslateStorageError(err)
+		u.trackOperationFailed(ctx, chapterEntity.ProjectID, chapterEntity.ID, "continue", generationdomain.KindChapterContinuation, startedAt, 0, translatedErr)
+		return nil, translatedErr
 	}
 
 	content, err := u.generateContent(ctx, systemPrompt, userPrompt)
@@ -279,44 +305,57 @@ func (u *useCase) Continue(ctx context.Context, params ContinueParams) (*Continu
 }
 
 func (u *useCase) Rewrite(ctx context.Context, params RewriteParams) (*RewriteResult, error) {
+	startedAt := time.Now().UTC()
 	params.ChapterID = strings.TrimSpace(params.ChapterID)
 	params.Instruction = strings.TrimSpace(params.Instruction)
 	trimmedTargetText := strings.TrimSpace(params.TargetText)
 
 	if err := validateChapterID(params.ChapterID); err != nil {
+		u.trackOperationFailed(ctx, "", params.ChapterID, "rewrite", generationdomain.KindChapterRewrite, startedAt, 0, err)
 		return nil, err
 	}
 	if params.Instruction == "" {
-		return nil, appservice.WrapInvalidInput(fmt.Errorf("instruction must not be empty"))
+		err := appservice.WrapInvalidInput(fmt.Errorf("instruction must not be empty"))
+		u.trackOperationFailed(ctx, "", params.ChapterID, "rewrite", generationdomain.KindChapterRewrite, startedAt, 0, err)
+		return nil, err
 	}
 	if trimmedTargetText == "" {
-		return nil, appservice.WrapInvalidInput(fmt.Errorf("target_text must not be empty"))
+		err := appservice.WrapInvalidInput(fmt.Errorf("target_text must not be empty"))
+		u.trackOperationFailed(ctx, "", params.ChapterID, "rewrite", generationdomain.KindChapterRewrite, startedAt, 0, err)
+		return nil, err
 	}
 
 	chapterEntity, err := u.chapters.GetByID(ctx, params.ChapterID)
 	if err != nil {
-		return nil, appservice.TranslateStorageError(err)
+		translatedErr := appservice.TranslateStorageError(err)
+		u.trackOperationFailed(ctx, "", params.ChapterID, "rewrite", generationdomain.KindChapterRewrite, startedAt, 0, translatedErr)
+		return nil, translatedErr
 	}
 	expectedUpdatedAt := chapterEntity.UpdatedAt
 	if !strings.Contains(chapterEntity.Content, params.TargetText) {
-		return nil, appservice.WrapInvalidInput(fmt.Errorf("target_text must exactly match existing chapter content"))
+		err := appservice.WrapInvalidInput(fmt.Errorf("target_text must exactly match existing chapter content"))
+		u.trackOperationFailed(ctx, chapterEntity.ProjectID, chapterEntity.ID, "rewrite", generationdomain.KindChapterRewrite, startedAt, 0, err)
+		return nil, err
 	}
 
 	projectEntity, promptContext, err := u.loadProjectAndPromptContext(ctx, chapterEntity.ProjectID)
 	if err != nil {
+		u.trackOperationFailed(ctx, chapterEntity.ProjectID, chapterEntity.ID, "rewrite", generationdomain.KindChapterRewrite, startedAt, 0, err)
 		return nil, err
 	}
 
 	systemPrompt, userPrompt, err := u.renderPrompt(generationdomain.KindChapterRewrite, buildRewritePromptData(projectEntity, promptContext, chapterEntity, params))
 	if err != nil {
+		u.trackOperationFailed(ctx, chapterEntity.ProjectID, chapterEntity.ID, "rewrite", generationdomain.KindChapterRewrite, startedAt, 0, err)
 		return nil, err
 	}
 
 	recordID := uuid.NewString()
-	startedAt := time.Now().UTC()
 	record := newGenerationRecord(recordID, chapterEntity.ProjectID, chapterEntity.ID, generationdomain.KindChapterRewrite, buildPromptSnapshot(systemPrompt, userPrompt), startedAt)
 	if err := u.generationRecords.Create(ctx, record); err != nil {
-		return nil, appservice.TranslateStorageError(err)
+		translatedErr := appservice.TranslateStorageError(err)
+		u.trackOperationFailed(ctx, chapterEntity.ProjectID, chapterEntity.ID, "rewrite", generationdomain.KindChapterRewrite, startedAt, 0, translatedErr)
+		return nil, translatedErr
 	}
 
 	content, err := u.generateContent(ctx, systemPrompt, userPrompt)
@@ -349,40 +388,56 @@ func (u *useCase) Rewrite(ctx context.Context, params RewriteParams) (*RewriteRe
 }
 
 func (u *useCase) Confirm(ctx context.Context, params ConfirmParams) (*chapterdomain.Chapter, error) {
+	startedAt := time.Now().UTC()
 	params.ChapterID = strings.TrimSpace(params.ChapterID)
 	params.ConfirmedBy = strings.TrimSpace(params.ConfirmedBy)
 
 	if err := validateChapterID(params.ChapterID); err != nil {
+		u.trackOperationFailed(ctx, "", params.ChapterID, "confirm", "", startedAt, 0, err)
 		return nil, err
 	}
 	if err := validateConfirmedBy(params.ConfirmedBy); err != nil {
+		u.trackOperationFailed(ctx, "", params.ChapterID, "confirm", "", startedAt, 0, err)
 		return nil, err
 	}
 
 	chapterEntity, err := u.chapters.GetByID(ctx, params.ChapterID)
 	if err != nil {
-		return nil, appservice.TranslateStorageError(err)
+		translatedErr := appservice.TranslateStorageError(err)
+		u.trackOperationFailed(ctx, "", params.ChapterID, "confirm", "", startedAt, 0, translatedErr)
+		return nil, translatedErr
 	}
 	expectedUpdatedAt := chapterEntity.UpdatedAt
 	if chapterEntity.CurrentDraftID == "" {
-		return nil, appservice.WrapConflict(fmt.Errorf("current_draft_id must not be empty"))
+		err := appservice.WrapConflict(fmt.Errorf("current_draft_id must not be empty"))
+		u.trackOperationFailed(ctx, chapterEntity.ProjectID, chapterEntity.ID, "confirm", "", startedAt, 0, err)
+		return nil, err
 	}
 	if chapterEntity.Status == chapterdomain.StatusConfirmed {
 		if chapterEntity.CurrentDraftConfirmedAt != nil && chapterEntity.CurrentDraftConfirmedBy != "" {
+			u.trackOperationSucceeded(ctx, chapterEntity.ProjectID, chapterEntity.ID, "confirm", "", startedAt, 0)
 			return chapterEntity, nil
 		}
-		return nil, appservice.WrapConflict(fmt.Errorf("chapter is already confirmed"))
+		err := appservice.WrapConflict(fmt.Errorf("chapter is already confirmed"))
+		u.trackOperationFailed(ctx, chapterEntity.ProjectID, chapterEntity.ID, "confirm", "", startedAt, 0, err)
+		return nil, err
 	}
 
 	record, err := u.generationRecords.GetByID(ctx, chapterEntity.CurrentDraftID)
 	if err != nil {
-		return nil, appservice.TranslateStorageError(err)
+		translatedErr := appservice.TranslateStorageError(err)
+		u.trackOperationFailed(ctx, chapterEntity.ProjectID, chapterEntity.ID, "confirm", "", startedAt, 0, translatedErr)
+		return nil, translatedErr
 	}
 	if record.ChapterID != chapterEntity.ID {
-		return nil, appservice.WrapConflict(fmt.Errorf("current draft generation record does not belong to chapter"))
+		err := appservice.WrapConflict(fmt.Errorf("current draft generation record does not belong to chapter"))
+		u.trackOperationFailed(ctx, chapterEntity.ProjectID, chapterEntity.ID, "confirm", "", startedAt, 0, err)
+		return nil, err
 	}
 	if record.Status != generationdomain.StatusSucceeded {
-		return nil, appservice.WrapConflict(fmt.Errorf("current draft generation record must be succeeded before confirmation"))
+		err := appservice.WrapConflict(fmt.Errorf("current draft generation record must be succeeded before confirmation"))
+		u.trackOperationFailed(ctx, chapterEntity.ProjectID, chapterEntity.ID, "confirm", "", startedAt, 0, err)
+		return nil, err
 	}
 
 	now := time.Now().UTC()
@@ -392,16 +447,23 @@ func (u *useCase) Confirm(ctx context.Context, params ConfirmParams) (*chapterdo
 	updated.CurrentDraftConfirmedBy = params.ConfirmedBy
 	updated.UpdatedAt = now
 	if err := updated.Validate(); err != nil {
-		return nil, appservice.WrapInvalidInput(err)
+		wrappedErr := appservice.WrapInvalidInput(err)
+		u.trackOperationFailed(ctx, chapterEntity.ProjectID, chapterEntity.ID, "confirm", "", startedAt, 0, wrappedErr)
+		return nil, wrappedErr
 	}
 	updatedOK, err := u.chapters.UpdateIfUnchanged(ctx, &updated, expectedUpdatedAt)
 	if err != nil {
-		return nil, appservice.TranslateStorageError(err)
+		translatedErr := appservice.TranslateStorageError(err)
+		u.trackOperationFailed(ctx, chapterEntity.ProjectID, chapterEntity.ID, "confirm", "", startedAt, 0, translatedErr)
+		return nil, translatedErr
 	}
 	if !updatedOK {
-		return nil, appservice.WrapConflict(fmt.Errorf("chapter was modified during confirmation; please retry"))
+		err := appservice.WrapConflict(fmt.Errorf("chapter was modified during confirmation; please retry"))
+		u.trackOperationFailed(ctx, chapterEntity.ProjectID, chapterEntity.ID, "confirm", "", startedAt, 0, err)
+		return nil, err
 	}
 
+	u.trackOperationSucceeded(ctx, updated.ProjectID, updated.ID, "confirm", "", startedAt, 0)
 	return &updated, nil
 }
 
@@ -563,17 +625,20 @@ func buildPromptSnapshot(systemPrompt, userPrompt string) string {
 
 func (u *useCase) succeedGeneration(ctx context.Context, record *generationdomain.GenerationRecord, outputRef string, startedAt time.Time) error {
 	updatedAt := time.Now().UTC()
+	duration := durationMillis(startedAt, updatedAt)
 	params := generationdomain.UpdateStatusParams{
 		ID:             record.ID,
 		Status:         generationdomain.StatusSucceeded,
 		OutputRef:      outputRef,
 		TokenUsage:     0,
-		DurationMillis: durationMillis(startedAt, updatedAt),
+		DurationMillis: duration,
 		ErrorMessage:   "",
 		UpdatedAt:      updatedAt,
 	}
 	if err := u.generationRecords.UpdateStatus(ctx, params); err != nil {
-		return appservice.TranslateStorageError(err)
+		translatedErr := appservice.TranslateStorageError(err)
+		u.trackOperationFailed(ctx, record.ProjectID, record.ChapterID, operationActionForGenerationKind(record.Kind), record.Kind, startedAt, 0, translatedErr)
+		return translatedErr
 	}
 	record.Status = params.Status
 	record.OutputRef = params.OutputRef
@@ -581,22 +646,26 @@ func (u *useCase) succeedGeneration(ctx context.Context, record *generationdomai
 	record.DurationMillis = params.DurationMillis
 	record.ErrorMessage = params.ErrorMessage
 	record.UpdatedAt = params.UpdatedAt
+	u.trackOperationSucceeded(ctx, record.ProjectID, record.ChapterID, operationActionForGenerationKind(record.Kind), record.Kind, startedAt, record.TokenUsage)
 	return nil
 }
 
 func (u *useCase) failGeneration(ctx context.Context, record *generationdomain.GenerationRecord, outputRef string, startedAt time.Time, cause error) error {
 	updatedAt := time.Now().UTC()
+	duration := durationMillis(startedAt, updatedAt)
 	params := generationdomain.UpdateStatusParams{
 		ID:             record.ID,
 		Status:         generationdomain.StatusFailed,
 		OutputRef:      outputRef,
 		TokenUsage:     0,
-		DurationMillis: durationMillis(startedAt, updatedAt),
+		DurationMillis: duration,
 		ErrorMessage:   cause.Error(),
 		UpdatedAt:      updatedAt,
 	}
 	if err := u.generationRecords.UpdateStatus(ctx, params); err != nil {
-		return fmt.Errorf("mark generation failed: %w; original error: %v", appservice.TranslateStorageError(err), cause)
+		wrappedErr := fmt.Errorf("mark generation failed: %w; original error: %v", appservice.TranslateStorageError(err), cause)
+		u.trackOperationFailed(ctx, record.ProjectID, record.ChapterID, operationActionForGenerationKind(record.Kind), record.Kind, startedAt, 0, wrappedErr)
+		return wrappedErr
 	}
 	record.Status = params.Status
 	record.OutputRef = params.OutputRef
@@ -604,7 +673,95 @@ func (u *useCase) failGeneration(ctx context.Context, record *generationdomain.G
 	record.DurationMillis = params.DurationMillis
 	record.ErrorMessage = params.ErrorMessage
 	record.UpdatedAt = params.UpdatedAt
+	u.trackOperationFailed(ctx, record.ProjectID, record.ChapterID, operationActionForGenerationKind(record.Kind), record.Kind, startedAt, record.TokenUsage, cause)
 	return cause
+}
+
+func operationActionForGenerationKind(kind string) string {
+	switch kind {
+	case generationdomain.KindChapterGeneration:
+		return "generate"
+	case generationdomain.KindChapterContinuation:
+		return "continue"
+	case generationdomain.KindChapterRewrite:
+		return "rewrite"
+	default:
+		return ""
+	}
+}
+
+func (u *useCase) trackOperationSucceeded(ctx context.Context, projectID, chapterID, action, generationKind string, startedAt time.Time, tokenUsage int) {
+	if strings.TrimSpace(action) == "" {
+		return
+	}
+	u.appendMetricEvent(ctx, metricdomain.EventOperationCompleted, projectID, chapterID, action, generationKind, tokenUsage, startedAt, nil)
+}
+
+func (u *useCase) trackOperationFailed(ctx context.Context, projectID, chapterID, action, generationKind string, startedAt time.Time, tokenUsage int, cause error) {
+	if strings.TrimSpace(action) == "" {
+		return
+	}
+	u.appendMetricEvent(ctx, metricdomain.EventOperationFailed, projectID, chapterID, action, generationKind, tokenUsage, startedAt, cause)
+}
+
+func (u *useCase) appendMetricEvent(ctx context.Context, eventName, projectID, chapterID, action, generationKind string, tokenUsage int, startedAt time.Time, cause error) {
+	if u.metrics == nil {
+		return
+	}
+
+	projectID = strings.TrimSpace(projectID)
+	if _, err := uuid.Parse(projectID); err != nil {
+		// 无法确定项目归属时跳过落库，避免污染事件表。
+		log.Printf("metric append skipped event_name=%s action=%s reason=invalid_project_id", eventName, action)
+		return
+	}
+
+	chapterID = strings.TrimSpace(chapterID)
+	if chapterID != "" {
+		if _, err := uuid.Parse(chapterID); err != nil {
+			chapterID = ""
+		}
+	}
+
+	labels := map[string]string{
+		"domain": "chapter",
+		"action": action,
+	}
+	if generationKind != "" {
+		labels["generation_kind"] = generationKind
+	}
+	if cause != nil {
+		labels["error_kind"] = errorKindFor(cause)
+	}
+
+	event := &metricdomain.MetricEvent{
+		EventName: eventName,
+		ProjectID: projectID,
+		ChapterID: chapterID,
+		Labels:    labels,
+		Stats: map[string]float64{
+			"duration_ms": float64(durationMillis(startedAt, time.Now().UTC())),
+			"token_usage": float64(tokenUsage),
+		},
+		OccurredAt: time.Now().UTC(),
+	}
+	if err := u.metrics.Append(ctx, event); err != nil {
+		// 埋点失败不影响主业务流程，仅记录 warning 以便排查。
+		log.Printf("metric append failed event_name=%s action=%s project_id=%s chapter_id=%s err=%v", eventName, action, projectID, chapterID, err)
+	}
+}
+
+func errorKindFor(err error) string {
+	switch {
+	case errors.Is(err, appservice.ErrInvalidInput):
+		return "invalid_input"
+	case errors.Is(err, appservice.ErrNotFound):
+		return "not_found"
+	case errors.Is(err, appservice.ErrConflict):
+		return "conflict"
+	default:
+		return "internal"
+	}
 }
 
 func durationMillis(startedAt, endedAt time.Time) int64 {

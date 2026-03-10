@@ -3,17 +3,21 @@ package conversation
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
+	"log"
 	"strings"
 	"time"
 
 	assetdomain "novelforge/backend/internal/domain/asset"
 	conversationdomain "novelforge/backend/internal/domain/conversation"
+	metricdomain "novelforge/backend/internal/domain/metric"
 	projectdomain "novelforge/backend/internal/domain/project"
 	"novelforge/backend/internal/infra/llm"
 	"novelforge/backend/internal/infra/llm/prompts"
 	appservice "novelforge/backend/internal/service"
+	metricservice "novelforge/backend/internal/service/metric"
 
 	"github.com/cloudwego/eino/schema"
 	"github.com/google/uuid"
@@ -30,6 +34,7 @@ type useCase struct {
 	assets        assetdomain.AssetRepository
 	llmClient     llm.Client
 	promptStore   *prompts.Store
+	metrics       metricservice.UseCase
 }
 
 // NewUseCase 创建对话(conversation)细化用例实现。
@@ -40,27 +45,34 @@ func NewUseCase(deps Dependencies) UseCase {
 		assets:        deps.Assets,
 		llmClient:     deps.LLMClient,
 		promptStore:   deps.PromptStore,
+		metrics:       deps.Metrics,
 	}
 }
 
 func (u *useCase) Start(ctx context.Context, params StartParams) (*conversationdomain.Conversation, error) {
+	startedAt := time.Now().UTC()
 	params.ProjectID = strings.TrimSpace(params.ProjectID)
 	params.TargetType = strings.TrimSpace(params.TargetType)
 	params.TargetID = strings.TrimSpace(params.TargetID)
 	params.Message = strings.TrimSpace(params.Message)
 
 	if err := validateProjectID(params.ProjectID); err != nil {
+		u.trackOperationFailed(ctx, params.ProjectID, params.TargetType, "start", startedAt, 0, err)
 		return nil, err
 	}
 	if err := validateTarget(params.TargetType, params.TargetID); err != nil {
+		u.trackOperationFailed(ctx, params.ProjectID, params.TargetType, "start", startedAt, 0, err)
 		return nil, err
 	}
 	if params.Message == "" {
-		return nil, appservice.WrapInvalidInput(fmt.Errorf("message must not be empty"))
+		err := appservice.WrapInvalidInput(fmt.Errorf("message must not be empty"))
+		u.trackOperationFailed(ctx, params.ProjectID, params.TargetType, "start", startedAt, 0, err)
+		return nil, err
 	}
 
 	target, err := u.loadTarget(ctx, params.ProjectID, params.TargetType, params.TargetID)
 	if err != nil {
+		u.trackOperationFailed(ctx, params.ProjectID, params.TargetType, "start", startedAt, 0, err)
 		return nil, err
 	}
 
@@ -76,82 +88,115 @@ func (u *useCase) Start(ctx context.Context, params StartParams) (*conversationd
 
 	userMessage := newConversationMessage(conversationdomain.MessageRoleUser, params.Message, now)
 	if err := conversation.AppendMessage(userMessage); err != nil {
-		return nil, appservice.WrapInvalidInput(err)
+		wrappedErr := appservice.WrapInvalidInput(err)
+		u.trackOperationFailed(ctx, params.ProjectID, params.TargetType, "start", startedAt, 0, wrappedErr)
+		return nil, wrappedErr
 	}
 
 	suggestion, assistantMessage, err := u.generateSuggestion(ctx, conversation, target, params.Message)
 	if err != nil {
+		u.trackOperationFailed(ctx, params.ProjectID, params.TargetType, "start", startedAt, 0, err)
 		return nil, err
 	}
 	if err := conversation.AppendMessage(assistantMessage); err != nil {
-		return nil, appservice.WrapInvalidInput(err)
+		wrappedErr := appservice.WrapInvalidInput(err)
+		u.trackOperationFailed(ctx, params.ProjectID, params.TargetType, "start", startedAt, 0, wrappedErr)
+		return nil, wrappedErr
 	}
 	if err := conversation.ReplacePendingSuggestion(*suggestion, assistantMessage.CreatedAt); err != nil {
-		return nil, appservice.WrapInvalidInput(err)
+		wrappedErr := appservice.WrapInvalidInput(err)
+		u.trackOperationFailed(ctx, params.ProjectID, params.TargetType, "start", startedAt, 0, wrappedErr)
+		return nil, wrappedErr
 	}
 
 	if err := u.conversations.Create(ctx, conversation); err != nil {
-		return nil, appservice.TranslateStorageError(err)
+		translatedErr := appservice.TranslateStorageError(err)
+		u.trackOperationFailed(ctx, params.ProjectID, params.TargetType, "start", startedAt, 0, translatedErr)
+		return nil, translatedErr
 	}
+	u.trackOperationSucceeded(ctx, params.ProjectID, params.TargetType, "start", startedAt, 0)
 	return conversation, nil
 }
 
 func (u *useCase) Reply(ctx context.Context, params ReplyParams) (*conversationdomain.Conversation, error) {
+	startedAt := time.Now().UTC()
 	params.ConversationID = strings.TrimSpace(params.ConversationID)
 	params.Message = strings.TrimSpace(params.Message)
 
 	if err := validateConversationID(params.ConversationID); err != nil {
+		u.trackOperationFailed(ctx, "", "", "reply", startedAt, 0, err)
 		return nil, err
 	}
 	if params.Message == "" {
-		return nil, appservice.WrapInvalidInput(fmt.Errorf("message must not be empty"))
+		err := appservice.WrapInvalidInput(fmt.Errorf("message must not be empty"))
+		u.trackOperationFailed(ctx, "", "", "reply", startedAt, 0, err)
+		return nil, err
 	}
 
 	conversation, err := u.conversations.GetByID(ctx, params.ConversationID)
 	if err != nil {
-		return nil, appservice.TranslateStorageError(err)
+		translatedErr := appservice.TranslateStorageError(err)
+		u.trackOperationFailed(ctx, "", "", "reply", startedAt, 0, translatedErr)
+		return nil, translatedErr
 	}
 
 	target, err := u.loadTarget(ctx, conversation.ProjectID, conversation.TargetType, conversation.TargetID)
 	if err != nil {
+		u.trackOperationFailed(ctx, conversation.ProjectID, conversation.TargetType, "reply", startedAt, 0, err)
 		return nil, err
 	}
 
 	now := time.Now().UTC()
 	userMessage := newConversationMessage(conversationdomain.MessageRoleUser, params.Message, now)
 	if err := conversation.AppendMessage(userMessage); err != nil {
-		return nil, appservice.WrapInvalidInput(err)
+		wrappedErr := appservice.WrapInvalidInput(err)
+		u.trackOperationFailed(ctx, conversation.ProjectID, conversation.TargetType, "reply", startedAt, 0, wrappedErr)
+		return nil, wrappedErr
 	}
 
 	suggestion, assistantMessage, err := u.generateSuggestion(ctx, conversation, target, params.Message)
 	if err != nil {
+		u.trackOperationFailed(ctx, conversation.ProjectID, conversation.TargetType, "reply", startedAt, 0, err)
 		return nil, err
 	}
 	if err := conversation.AppendMessage(assistantMessage); err != nil {
-		return nil, appservice.WrapInvalidInput(err)
+		wrappedErr := appservice.WrapInvalidInput(err)
+		u.trackOperationFailed(ctx, conversation.ProjectID, conversation.TargetType, "reply", startedAt, 0, wrappedErr)
+		return nil, wrappedErr
 	}
 	if err := conversation.ReplacePendingSuggestion(*suggestion, assistantMessage.CreatedAt); err != nil {
-		return nil, appservice.WrapInvalidInput(err)
+		wrappedErr := appservice.WrapInvalidInput(err)
+		u.trackOperationFailed(ctx, conversation.ProjectID, conversation.TargetType, "reply", startedAt, 0, wrappedErr)
+		return nil, wrappedErr
 	}
 
 	if err := u.conversations.Update(ctx, conversation); err != nil {
-		return nil, appservice.TranslateStorageError(err)
+		translatedErr := appservice.TranslateStorageError(err)
+		u.trackOperationFailed(ctx, conversation.ProjectID, conversation.TargetType, "reply", startedAt, 0, translatedErr)
+		return nil, translatedErr
 	}
+	u.trackOperationSucceeded(ctx, conversation.ProjectID, conversation.TargetType, "reply", startedAt, 0)
 	return conversation, nil
 }
 
 func (u *useCase) Confirm(ctx context.Context, conversationID string) (*ConfirmResult, error) {
+	startedAt := time.Now().UTC()
 	conversationID = strings.TrimSpace(conversationID)
 	if err := validateConversationID(conversationID); err != nil {
+		u.trackOperationFailed(ctx, "", "", "confirm", startedAt, 0, err)
 		return nil, err
 	}
 
 	conversation, err := u.conversations.GetByID(ctx, conversationID)
 	if err != nil {
-		return nil, appservice.TranslateStorageError(err)
+		translatedErr := appservice.TranslateStorageError(err)
+		u.trackOperationFailed(ctx, "", "", "confirm", startedAt, 0, translatedErr)
+		return nil, translatedErr
 	}
 	if conversation.PendingSuggestion == nil {
-		return nil, appservice.WrapInvalidInput(fmt.Errorf("pending_suggestion must not be empty"))
+		err := appservice.WrapInvalidInput(fmt.Errorf("pending_suggestion must not be empty"))
+		u.trackOperationFailed(ctx, conversation.ProjectID, conversation.TargetType, "confirm", startedAt, 0, err)
+		return nil, err
 	}
 
 	result := &ConfirmResult{Conversation: conversation}
@@ -161,51 +206,72 @@ func (u *useCase) Confirm(ctx context.Context, conversationID string) (*ConfirmR
 	case conversationdomain.TargetTypeProject:
 		projectEntity, loadErr := u.projects.GetByID(ctx, conversation.TargetID)
 		if loadErr != nil {
-			return nil, appservice.TranslateStorageError(loadErr)
+			translatedErr := appservice.TranslateStorageError(loadErr)
+			u.trackOperationFailed(ctx, conversation.ProjectID, conversation.TargetType, "confirm", startedAt, 0, translatedErr)
+			return nil, translatedErr
 		}
 		entityUpdatedAt := nonZeroUpdatedAt(projectEntity.UpdatedAt, conversationUpdatedAt)
 		projectEntity.Title = strings.TrimSpace(conversation.PendingSuggestion.Title)
 		projectEntity.Summary = strings.TrimSpace(conversation.PendingSuggestion.Summary)
 		projectEntity.UpdatedAt = entityUpdatedAt
 		if err := projectEntity.Validate(); err != nil {
-			return nil, appservice.WrapInvalidInput(err)
+			wrappedErr := appservice.WrapInvalidInput(err)
+			u.trackOperationFailed(ctx, conversation.ProjectID, conversation.TargetType, "confirm", startedAt, 0, wrappedErr)
+			return nil, wrappedErr
 		}
 		if err := u.projects.Update(ctx, projectEntity); err != nil {
-			return nil, appservice.TranslateStorageError(err)
+			translatedErr := appservice.TranslateStorageError(err)
+			u.trackOperationFailed(ctx, conversation.ProjectID, conversation.TargetType, "confirm", startedAt, 0, translatedErr)
+			return nil, translatedErr
 		}
 		result.Project = projectEntity
 	case conversationdomain.TargetTypeAsset:
 		assetEntity, loadErr := u.assets.GetByID(ctx, conversation.TargetID)
 		if loadErr != nil {
-			return nil, appservice.TranslateStorageError(loadErr)
+			translatedErr := appservice.TranslateStorageError(loadErr)
+			u.trackOperationFailed(ctx, conversation.ProjectID, conversation.TargetType, "confirm", startedAt, 0, translatedErr)
+			return nil, translatedErr
 		}
 		if assetEntity.ProjectID != conversation.ProjectID {
-			return nil, appservice.WrapInvalidInput(fmt.Errorf("asset does not belong to project"))
+			err := appservice.WrapInvalidInput(fmt.Errorf("asset does not belong to project"))
+			u.trackOperationFailed(ctx, conversation.ProjectID, conversation.TargetType, "confirm", startedAt, 0, err)
+			return nil, err
 		}
 		entityUpdatedAt := nonZeroUpdatedAt(assetEntity.UpdatedAt, conversationUpdatedAt)
 		assetEntity.Title = strings.TrimSpace(conversation.PendingSuggestion.Title)
 		assetEntity.Content = strings.TrimSpace(conversation.PendingSuggestion.Content)
 		assetEntity.UpdatedAt = entityUpdatedAt
 		if err := assetEntity.Validate(); err != nil {
-			return nil, appservice.WrapInvalidInput(err)
+			wrappedErr := appservice.WrapInvalidInput(err)
+			u.trackOperationFailed(ctx, conversation.ProjectID, conversation.TargetType, "confirm", startedAt, 0, wrappedErr)
+			return nil, wrappedErr
 		}
 		if err := u.assets.Update(ctx, assetEntity); err != nil {
-			return nil, appservice.TranslateStorageError(err)
+			translatedErr := appservice.TranslateStorageError(err)
+			u.trackOperationFailed(ctx, conversation.ProjectID, conversation.TargetType, "confirm", startedAt, 0, translatedErr)
+			return nil, translatedErr
 		}
 		result.Asset = assetEntity
 	default:
-		return nil, appservice.WrapInvalidInput(fmt.Errorf("target_type must be one of project, asset"))
+		err := appservice.WrapInvalidInput(fmt.Errorf("target_type must be one of project, asset"))
+		u.trackOperationFailed(ctx, conversation.ProjectID, conversation.TargetType, "confirm", startedAt, 0, err)
+		return nil, err
 	}
 
 	conversation.ClearPendingSuggestion(conversationUpdatedAt)
 	systemMessage := newConversationMessage(conversationdomain.MessageRoleSystem, confirmedMessageContent(conversation.TargetType), conversationUpdatedAt)
 	if err := conversation.AppendMessage(systemMessage); err != nil {
-		return nil, appservice.WrapInvalidInput(err)
+		wrappedErr := appservice.WrapInvalidInput(err)
+		u.trackOperationFailed(ctx, conversation.ProjectID, conversation.TargetType, "confirm", startedAt, 0, wrappedErr)
+		return nil, wrappedErr
 	}
 	if err := u.conversations.Update(ctx, conversation); err != nil {
-		return nil, appservice.TranslateStorageError(err)
+		translatedErr := appservice.TranslateStorageError(err)
+		u.trackOperationFailed(ctx, conversation.ProjectID, conversation.TargetType, "confirm", startedAt, 0, translatedErr)
+		return nil, translatedErr
 	}
 	result.Conversation = conversation
+	u.trackOperationSucceeded(ctx, conversation.ProjectID, conversation.TargetType, "confirm", startedAt, 0)
 	return result, nil
 }
 
@@ -487,6 +553,80 @@ func promptKindForTarget(targetType string) string {
 	default:
 		return ""
 	}
+}
+
+func (u *useCase) trackOperationSucceeded(ctx context.Context, projectID, targetType, action string, startedAt time.Time, tokenUsage int) {
+	if strings.TrimSpace(action) == "" {
+		return
+	}
+	u.appendMetricEvent(ctx, metricdomain.EventOperationCompleted, projectID, targetType, action, tokenUsage, startedAt, nil)
+}
+
+func (u *useCase) trackOperationFailed(ctx context.Context, projectID, targetType, action string, startedAt time.Time, tokenUsage int, cause error) {
+	if strings.TrimSpace(action) == "" {
+		return
+	}
+	u.appendMetricEvent(ctx, metricdomain.EventOperationFailed, projectID, targetType, action, tokenUsage, startedAt, cause)
+}
+
+func (u *useCase) appendMetricEvent(ctx context.Context, eventName, projectID, targetType, action string, tokenUsage int, startedAt time.Time, cause error) {
+	if u.metrics == nil {
+		return
+	}
+
+	projectID = strings.TrimSpace(projectID)
+	if _, err := uuid.Parse(projectID); err != nil {
+		// 无法确定项目归属时跳过落库，避免污染事件表。
+		log.Printf("metric append skipped event_name=%s action=%s reason=invalid_project_id", eventName, action)
+		return
+	}
+
+	labels := map[string]string{
+		"domain": "conversation",
+		"action": action,
+	}
+	targetType = strings.TrimSpace(targetType)
+	if targetType != "" {
+		labels["target_type"] = targetType
+	}
+	if cause != nil {
+		labels["error_kind"] = errorKindFor(cause)
+	}
+
+	event := &metricdomain.MetricEvent{
+		EventName: eventName,
+		ProjectID: projectID,
+		Labels:    labels,
+		Stats: map[string]float64{
+			"duration_ms": float64(durationMillis(startedAt, time.Now().UTC())),
+			"token_usage": float64(tokenUsage),
+		},
+		OccurredAt: time.Now().UTC(),
+	}
+	if err := u.metrics.Append(ctx, event); err != nil {
+		// 埋点失败不影响主业务流程，仅记录 warning 以便排查。
+		log.Printf("metric append failed event_name=%s action=%s project_id=%s err=%v", eventName, action, projectID, err)
+	}
+}
+
+func errorKindFor(err error) string {
+	switch {
+	case errors.Is(err, appservice.ErrInvalidInput):
+		return "invalid_input"
+	case errors.Is(err, appservice.ErrNotFound):
+		return "not_found"
+	case errors.Is(err, appservice.ErrConflict):
+		return "conflict"
+	default:
+		return "internal"
+	}
+}
+
+func durationMillis(startedAt, endedAt time.Time) int64 {
+	if endedAt.Before(startedAt) {
+		return 0
+	}
+	return endedAt.Sub(startedAt).Milliseconds()
 }
 
 func validateProjectID(id string) error {

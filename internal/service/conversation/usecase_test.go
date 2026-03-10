@@ -9,14 +9,18 @@ import (
 
 	assetdomain "novelforge/backend/internal/domain/asset"
 	conversationdomain "novelforge/backend/internal/domain/conversation"
+	metricdomain "novelforge/backend/internal/domain/metric"
 	projectdomain "novelforge/backend/internal/domain/project"
 	"novelforge/backend/internal/infra/llm"
 	"novelforge/backend/internal/infra/llm/prompts"
 	"novelforge/backend/internal/infra/storage/memory"
+	appservice "novelforge/backend/internal/service"
+	metricservice "novelforge/backend/internal/service/metric"
 	"novelforge/backend/pkg/config"
 
 	"github.com/cloudwego/eino/components/model"
 	"github.com/cloudwego/eino/schema"
+	"github.com/google/uuid"
 )
 
 type stubChatModel struct {
@@ -99,10 +103,15 @@ func createAssetEntity(t *testing.T, repo assetdomain.AssetRepository, projectID
 	return entity
 }
 
+func newMetricUseCase(metricRepo metricdomain.MetricEventRepository) metricservice.UseCase {
+	return metricservice.NewUseCase(metricservice.Dependencies{MetricEvents: metricRepo})
+}
+
 func TestUseCaseStartProjectConversationStoresPendingSuggestion(t *testing.T) {
 	projectRepo := memory.NewProjectRepository()
 	assetRepo := memory.NewAssetRepository()
 	conversationRepo := memory.NewConversationRepository()
+	metricRepo := memory.NewMetricEventRepository()
 	project := createProjectEntity(t, projectRepo)
 	promptStore := loadTestPromptStore(t)
 
@@ -111,6 +120,7 @@ func TestUseCaseStartProjectConversationStoresPendingSuggestion(t *testing.T) {
 		Conversations: conversationRepo,
 		Projects:      projectRepo,
 		Assets:        assetRepo,
+		Metrics:       newMetricUseCase(metricRepo),
 		PromptStore:   promptStore,
 		LLMClient: &stubLLMClient{chatModel: &stubChatModel{generate: func(_ context.Context, input []*schema.Message, _ ...model.Option) (*schema.Message, error) {
 			gotMessages = input
@@ -152,12 +162,30 @@ func TestUseCaseStartProjectConversationStoresPendingSuggestion(t *testing.T) {
 	if !strings.Contains(gotMessages[1].Content, "Please refine the title and summary.") {
 		t.Fatalf("user prompt = %q, want latest user message", gotMessages[1].Content)
 	}
+	events, err := metricRepo.ListByProject(context.Background(), metricdomain.ListByProjectParams{
+		ProjectID: project.ID,
+		EventName: metricdomain.EventOperationCompleted,
+	})
+	if err != nil {
+		t.Fatalf("ListByProject(metric) error = %v", err)
+	}
+	if len(events) != 1 {
+		t.Fatalf("len(events) = %d, want 1", len(events))
+	}
+	event := events[0]
+	if event.Labels["domain"] != "conversation" || event.Labels["action"] != "start" {
+		t.Fatalf("event labels = %#v, want conversation/start", event.Labels)
+	}
+	if event.Labels["target_type"] != conversationdomain.TargetTypeProject {
+		t.Fatalf("event labels[target_type] = %q, want %q", event.Labels["target_type"], conversationdomain.TargetTypeProject)
+	}
 }
 
 func TestUseCaseReplyAssetConversationReplacesPendingSuggestion(t *testing.T) {
 	projectRepo := memory.NewProjectRepository()
 	assetRepo := memory.NewAssetRepository()
 	conversationRepo := memory.NewConversationRepository()
+	metricRepo := memory.NewMetricEventRepository()
 	project := createProjectEntity(t, projectRepo)
 	asset := createAssetEntity(t, assetRepo, project.ID)
 	promptStore := loadTestPromptStore(t)
@@ -166,6 +194,7 @@ func TestUseCaseReplyAssetConversationReplacesPendingSuggestion(t *testing.T) {
 		Conversations: conversationRepo,
 		Projects:      projectRepo,
 		Assets:        assetRepo,
+		Metrics:       newMetricUseCase(metricRepo),
 		PromptStore:   promptStore,
 		LLMClient: &stubLLMClient{chatModel: &stubChatModel{generate: func(_ context.Context, _ []*schema.Message, _ ...model.Option) (*schema.Message, error) {
 			return &schema.Message{Content: `{"title":"Initial outline","content":"Initial outline content"}`}, nil
@@ -185,6 +214,7 @@ func TestUseCaseReplyAssetConversationReplacesPendingSuggestion(t *testing.T) {
 		Conversations: conversationRepo,
 		Projects:      projectRepo,
 		Assets:        assetRepo,
+		Metrics:       newMetricUseCase(metricRepo),
 		PromptStore:   promptStore,
 		LLMClient: &stubLLMClient{chatModel: &stubChatModel{generate: func(_ context.Context, _ []*schema.Message, _ ...model.Option) (*schema.Message, error) {
 			return &schema.Message{Content: `{"title":"Updated outline","content":"Updated outline content"}`}, nil
@@ -209,12 +239,31 @@ func TestUseCaseReplyAssetConversationReplacesPendingSuggestion(t *testing.T) {
 	if updated.Messages[2].Role != conversationdomain.MessageRoleUser || updated.Messages[3].Role != conversationdomain.MessageRoleAssistant {
 		t.Fatalf("reply message roles = %#v, want user then assistant", []string{updated.Messages[2].Role, updated.Messages[3].Role})
 	}
+
+	completedEvents, err := metricRepo.ListByProject(context.Background(), metricdomain.ListByProjectParams{
+		ProjectID: project.ID,
+		EventName: metricdomain.EventOperationCompleted,
+	})
+	if err != nil {
+		t.Fatalf("ListByProject(metric) error = %v", err)
+	}
+	if len(completedEvents) != 2 {
+		t.Fatalf("len(completedEvents) = %d, want 2", len(completedEvents))
+	}
+	replyEvent := completedEvents[1]
+	if replyEvent.Labels["domain"] != "conversation" || replyEvent.Labels["action"] != "reply" {
+		t.Fatalf("reply event labels = %#v, want conversation/reply", replyEvent.Labels)
+	}
+	if replyEvent.Labels["target_type"] != conversationdomain.TargetTypeAsset {
+		t.Fatalf("reply event labels[target_type] = %q, want %q", replyEvent.Labels["target_type"], conversationdomain.TargetTypeAsset)
+	}
 }
 
 func TestUseCaseConfirmProjectAppliesSuggestionAndClearsPending(t *testing.T) {
 	projectRepo := memory.NewProjectRepository()
 	assetRepo := memory.NewAssetRepository()
 	conversationRepo := memory.NewConversationRepository()
+	metricRepo := memory.NewMetricEventRepository()
 	project := createProjectEntity(t, projectRepo)
 	promptStore := loadTestPromptStore(t)
 
@@ -222,6 +271,7 @@ func TestUseCaseConfirmProjectAppliesSuggestionAndClearsPending(t *testing.T) {
 		Conversations: conversationRepo,
 		Projects:      projectRepo,
 		Assets:        assetRepo,
+		Metrics:       newMetricUseCase(metricRepo),
 		PromptStore:   promptStore,
 		LLMClient: &stubLLMClient{chatModel: &stubChatModel{generate: func(_ context.Context, _ []*schema.Message, _ ...model.Option) (*schema.Message, error) {
 			return &schema.Message{Content: `{"title":"Confirmed title","summary":"Confirmed summary"}`}, nil
@@ -260,12 +310,28 @@ func TestUseCaseConfirmProjectAppliesSuggestionAndClearsPending(t *testing.T) {
 	if storedProject.Title != "Confirmed title" || storedProject.Summary != "Confirmed summary" {
 		t.Fatalf("stored project = %#v, want updated values", storedProject)
 	}
+
+	completedEvents, err := metricRepo.ListByProject(context.Background(), metricdomain.ListByProjectParams{
+		ProjectID: project.ID,
+		EventName: metricdomain.EventOperationCompleted,
+	})
+	if err != nil {
+		t.Fatalf("ListByProject(metric) error = %v", err)
+	}
+	if len(completedEvents) != 2 {
+		t.Fatalf("len(completedEvents) = %d, want 2", len(completedEvents))
+	}
+	confirmEvent := completedEvents[1]
+	if confirmEvent.Labels["domain"] != "conversation" || confirmEvent.Labels["action"] != "confirm" {
+		t.Fatalf("confirm event labels = %#v, want conversation/confirm", confirmEvent.Labels)
+	}
 }
 
 func TestUseCaseStartRejectsInvalidLLMJSON(t *testing.T) {
 	projectRepo := memory.NewProjectRepository()
 	assetRepo := memory.NewAssetRepository()
 	conversationRepo := memory.NewConversationRepository()
+	metricRepo := memory.NewMetricEventRepository()
 	project := createProjectEntity(t, projectRepo)
 	promptStore := loadTestPromptStore(t)
 
@@ -273,6 +339,7 @@ func TestUseCaseStartRejectsInvalidLLMJSON(t *testing.T) {
 		Conversations: conversationRepo,
 		Projects:      projectRepo,
 		Assets:        assetRepo,
+		Metrics:       newMetricUseCase(metricRepo),
 		PromptStore:   promptStore,
 		LLMClient: &stubLLMClient{chatModel: &stubChatModel{generate: func(_ context.Context, _ []*schema.Message, _ ...model.Option) (*schema.Message, error) {
 			return &schema.Message{Content: `{"title":"Broken","summary":"Still broken"} trailing`}, nil
@@ -290,6 +357,56 @@ func TestUseCaseStartRejectsInvalidLLMJSON(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "invalid llm json") {
 		t.Fatalf("Start() error = %v, want invalid llm json", err)
+	}
+
+	failedEvents, listErr := metricRepo.ListByProject(context.Background(), metricdomain.ListByProjectParams{
+		ProjectID: project.ID,
+		EventName: metricdomain.EventOperationFailed,
+	})
+	if listErr != nil {
+		t.Fatalf("ListByProject(metric) error = %v", listErr)
+	}
+	if len(failedEvents) != 1 {
+		t.Fatalf("len(failedEvents) = %d, want 1", len(failedEvents))
+	}
+	if failedEvents[0].Labels["error_kind"] != "invalid_input" {
+		t.Fatalf("failed event labels[error_kind] = %q, want %q", failedEvents[0].Labels["error_kind"], "invalid_input")
+	}
+}
+
+func TestUseCaseReplySkipsMetricWhenProjectIDUnavailable(t *testing.T) {
+	projectRepo := memory.NewProjectRepository()
+	assetRepo := memory.NewAssetRepository()
+	conversationRepo := memory.NewConversationRepository()
+	metricRepo := memory.NewMetricEventRepository()
+	useCase := NewUseCase(Dependencies{
+		Conversations: conversationRepo,
+		Projects:      projectRepo,
+		Assets:        assetRepo,
+		Metrics:       newMetricUseCase(metricRepo),
+		PromptStore:   loadTestPromptStore(t),
+		LLMClient:     &stubLLMClient{chatModel: &stubChatModel{}},
+	})
+
+	_, err := useCase.Reply(context.Background(), ReplyParams{
+		ConversationID: "11111111-1111-1111-1111-111111111111",
+		Message:        "继续优化。",
+	})
+	if err == nil {
+		t.Fatal("Reply() error = nil, want not found")
+	}
+	if !errors.Is(err, appservice.ErrNotFound) {
+		t.Fatalf("Reply() error = %v, want ErrNotFound", err)
+	}
+	failedEvents, listErr := metricRepo.ListByProject(context.Background(), metricdomain.ListByProjectParams{
+		ProjectID: uuid.NewString(),
+		EventName: metricdomain.EventOperationFailed,
+	})
+	if listErr != nil {
+		t.Fatalf("ListByProject(metric) error = %v", listErr)
+	}
+	if len(failedEvents) != 0 {
+		t.Fatalf("len(failedEvents) = %d, want 0 when project_id is unavailable", len(failedEvents))
 	}
 }
 

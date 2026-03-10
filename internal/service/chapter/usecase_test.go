@@ -10,10 +10,12 @@ import (
 	assetdomain "novelforge/backend/internal/domain/asset"
 	chapterdomain "novelforge/backend/internal/domain/chapter"
 	generationdomain "novelforge/backend/internal/domain/generation"
+	metricdomain "novelforge/backend/internal/domain/metric"
 	projectdomain "novelforge/backend/internal/domain/project"
 	"novelforge/backend/internal/infra/llm/prompts"
 	"novelforge/backend/internal/infra/storage/memory"
 	appservice "novelforge/backend/internal/service"
+	metricservice "novelforge/backend/internal/service/metric"
 	"novelforge/backend/pkg/config"
 
 	"github.com/cloudwego/eino/components/model"
@@ -116,6 +118,23 @@ func createGenerationRecordEntity(t *testing.T, repo generationdomain.Generation
 	return entity
 }
 
+func newMetricUseCase(metricRepo metricdomain.MetricEventRepository) metricservice.UseCase {
+	return metricservice.NewUseCase(metricservice.Dependencies{MetricEvents: metricRepo})
+}
+
+type metricUseCaseSpy struct {
+	appendCalls int
+}
+
+func (s *metricUseCaseSpy) Append(_ context.Context, _ *metricdomain.MetricEvent) error {
+	s.appendCalls++
+	return nil
+}
+
+func (s *metricUseCaseSpy) ListByProject(context.Context, metricdomain.ListByProjectParams) ([]*metricdomain.MetricEvent, error) {
+	return nil, nil
+}
+
 func TestUseCaseGenerateCreatesChapterAndGenerationRecord(t *testing.T) {
 	projectRepo := memory.NewProjectRepository()
 	assetRepo := memory.NewAssetRepository()
@@ -198,6 +217,115 @@ func TestUseCaseGenerateCreatesChapterAndGenerationRecord(t *testing.T) {
 	}
 }
 
+func TestUseCaseGenerateAppendsSuccessMetricEvent(t *testing.T) {
+	projectRepo := memory.NewProjectRepository()
+	assetRepo := memory.NewAssetRepository()
+	chapterRepo := memory.NewChapterRepository()
+	generationRepo := memory.NewGenerationRecordRepository()
+	metricRepo := memory.NewMetricEventRepository()
+	project := createProjectEntity(t, projectRepo, "11111111-1111-1111-1111-111111111111")
+	createAssetEntity(t, assetRepo, "22222222-2222-2222-2222-222222222222", project.ID, assetdomain.TypeOutline, "主线大纲", "第一章主角踏入王城。")
+	useCase := NewUseCase(Dependencies{
+		Chapters:          chapterRepo,
+		Projects:          projectRepo,
+		Assets:            assetRepo,
+		GenerationRecords: generationRepo,
+		PromptStore:       loadTestPromptStore(t),
+		Metrics:           newMetricUseCase(metricRepo),
+		LLMClient: &stubLLMClient{chatModel: &stubChatModel{generate: func(_ context.Context, _ []*schema.Message, _ ...model.Option) (*schema.Message, error) {
+			return &schema.Message{Content: "这是完整的第一章正文。"}, nil
+		}}},
+	})
+
+	result, err := useCase.Generate(context.Background(), GenerateParams{
+		ProjectID:   project.ID,
+		Title:       "第一章 王城初见",
+		Ordinal:     1,
+		Instruction: "写出主角第一次进入王城时的压迫感与好奇心。",
+	})
+	if err != nil {
+		t.Fatalf("Generate() error = %v", err)
+	}
+
+	events, err := metricRepo.ListByProject(context.Background(), metricdomain.ListByProjectParams{
+		ProjectID: project.ID,
+		EventName: metricdomain.EventOperationCompleted,
+	})
+	if err != nil {
+		t.Fatalf("ListByProject(metric) error = %v", err)
+	}
+	if len(events) != 1 {
+		t.Fatalf("len(events) = %d, want 1", len(events))
+	}
+	event := events[0]
+	if event.ProjectID != project.ID || event.ChapterID != result.Chapter.ID {
+		t.Fatalf("event = %#v, want project/chapter ids", event)
+	}
+	if event.Labels["domain"] != "chapter" || event.Labels["action"] != "generate" {
+		t.Fatalf("event labels = %#v, want chapter/generate", event.Labels)
+	}
+	if event.Labels["generation_kind"] != generationdomain.KindChapterGeneration {
+		t.Fatalf("event labels[generation_kind] = %q, want %q", event.Labels["generation_kind"], generationdomain.KindChapterGeneration)
+	}
+	if event.Stats["token_usage"] != 0 {
+		t.Fatalf("event stats[token_usage] = %v, want 0", event.Stats["token_usage"])
+	}
+	if event.Stats["duration_ms"] < 0 {
+		t.Fatalf("event stats[duration_ms] = %v, want >= 0", event.Stats["duration_ms"])
+	}
+}
+
+func TestUseCaseGenerateAppendsFailureMetricEvent(t *testing.T) {
+	projectRepo := memory.NewProjectRepository()
+	assetRepo := memory.NewAssetRepository()
+	chapterRepo := memory.NewChapterRepository()
+	generationRepo := memory.NewGenerationRecordRepository()
+	metricRepo := memory.NewMetricEventRepository()
+	project := createProjectEntity(t, projectRepo, "11111111-1111-1111-1111-111111111111")
+	useCase := NewUseCase(Dependencies{
+		Chapters:          chapterRepo,
+		Projects:          projectRepo,
+		Assets:            assetRepo,
+		GenerationRecords: generationRepo,
+		PromptStore:       loadTestPromptStore(t),
+		Metrics:           newMetricUseCase(metricRepo),
+		LLMClient: &stubLLMClient{chatModel: &stubChatModel{generate: func(_ context.Context, _ []*schema.Message, _ ...model.Option) (*schema.Message, error) {
+			return &schema.Message{Content: "   \n\t"}, nil
+		}}},
+	})
+
+	_, err := useCase.Generate(context.Background(), GenerateParams{
+		ProjectID:   project.ID,
+		Title:       "第一章",
+		Ordinal:     1,
+		Instruction: "开始写。",
+	})
+	if err == nil {
+		t.Fatal("Generate() error = nil, want error")
+	}
+
+	events, listErr := metricRepo.ListByProject(context.Background(), metricdomain.ListByProjectParams{
+		ProjectID: project.ID,
+		EventName: metricdomain.EventOperationFailed,
+	})
+	if listErr != nil {
+		t.Fatalf("ListByProject(metric) error = %v", listErr)
+	}
+	if len(events) != 1 {
+		t.Fatalf("len(events) = %d, want 1", len(events))
+	}
+	event := events[0]
+	if event.Labels["domain"] != "chapter" || event.Labels["action"] != "generate" {
+		t.Fatalf("event labels = %#v, want chapter/generate", event.Labels)
+	}
+	if event.Labels["generation_kind"] != generationdomain.KindChapterGeneration {
+		t.Fatalf("event labels[generation_kind] = %q, want %q", event.Labels["generation_kind"], generationdomain.KindChapterGeneration)
+	}
+	if event.Labels["error_kind"] != "internal" {
+		t.Fatalf("event labels[error_kind] = %q, want %q", event.Labels["error_kind"], "internal")
+	}
+}
+
 func TestUseCaseGenerateRejectsDuplicateOrdinal(t *testing.T) {
 	projectRepo := memory.NewProjectRepository()
 	assetRepo := memory.NewAssetRepository()
@@ -242,6 +370,35 @@ func TestUseCaseGenerateRejectsDuplicateOrdinal(t *testing.T) {
 	}
 	if len(records) != 0 {
 		t.Fatalf("len(records) = %d, want 0", len(records))
+	}
+}
+
+func TestUseCaseGenerateSkipsMetricWhenProjectIDUnavailable(t *testing.T) {
+	metricSpy := &metricUseCaseSpy{}
+	useCase := NewUseCase(Dependencies{
+		Chapters:          memory.NewChapterRepository(),
+		Projects:          memory.NewProjectRepository(),
+		Assets:            memory.NewAssetRepository(),
+		GenerationRecords: memory.NewGenerationRecordRepository(),
+		PromptStore:       loadTestPromptStore(t),
+		Metrics:           metricSpy,
+		LLMClient:         &stubLLMClient{chatModel: &stubChatModel{}},
+	})
+
+	_, err := useCase.Generate(context.Background(), GenerateParams{
+		ProjectID:   "invalid-project-id",
+		Title:       "第一章",
+		Ordinal:     1,
+		Instruction: "开始写。",
+	})
+	if err == nil {
+		t.Fatal("Generate() error = nil, want invalid input")
+	}
+	if !errors.Is(err, appservice.ErrInvalidInput) {
+		t.Fatalf("Generate() error = %v, want ErrInvalidInput", err)
+	}
+	if metricSpy.appendCalls != 0 {
+		t.Fatalf("metric append calls = %d, want 0 when project_id is invalid", metricSpy.appendCalls)
 	}
 }
 
