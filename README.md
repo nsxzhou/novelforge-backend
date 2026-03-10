@@ -18,6 +18,7 @@
   - `GET /api/v1/projects/:projectID`
   - `PUT /api/v1/projects/:projectID`
   - `POST /api/v1/projects/:projectID/assets`
+  - `POST /api/v1/projects/:projectID/assets/generate`
   - `GET /api/v1/projects/:projectID/assets`
   - `POST /api/v1/projects/:projectID/chapters`
   - `GET /api/v1/projects/:projectID/chapters`
@@ -60,7 +61,7 @@ V1 全部 6 个领域聚合已落地，每个聚合包含实体定义（`model.g
 当前已提供 Project / Asset / Conversation / Chapter / Metric 的应用用例实现：
 
 - `service/project`：项目创建 / 列表 / 查询 / 更新
-- `service/asset`：资产创建 / 列表 / 按类型过滤 / 查询 / 更新 / 删除
+- `service/asset`：资产创建 / AI 生成 / 列表 / 按类型过滤 / 查询 / 更新 / 删除
 - `service/conversation`：对话发起 / 继续 / 查询 / 按 project/target 列表 / 显式确认写回 Project / Asset
 - `service/chapter`：章节生成 / 列表 / 查询 / 当前稿确认 / 续写 / 局部重写，并为章节生成流创建和更新 `GenerationRecord`
 - `service/metric`：指标事件 append/list 用例实现，已接入章节与对话微调业务采集流程
@@ -68,6 +69,7 @@ V1 全部 6 个领域聚合已落地，每个聚合包含实体定义（`model.g
 ### 埋点与可观测性（V1 采集）
 
 - 当前已采集动作：
+  - asset：`generate`
   - chapter：`generate` / `continue` / `rewrite` / `confirm`
   - conversation：`start` / `reply` / `confirm`
 - 统一事件名：
@@ -105,19 +107,13 @@ V1 全部 6 个领域聚合已落地，每个聚合包含实体定义（`model.g
    export NOVELFORGE_LLM_API_KEY="your-key"
    ```
 
-4. 执行数据库迁移：
-
-   ```bash
-   go run ./cmd/migrate -config configs/config.yaml
-   ```
-
-5. 启动服务：
+4. 启动服务（`provider=postgres` 时会自动执行 migration）：
 
    ```bash
    go run ./cmd/server -config configs/config.yaml
    ```
 
-也可以使用辅助脚本，它会在 `provider=postgres` 时自动执行迁移：
+也可以使用辅助脚本启动：
 
 ```bash
 ./scripts/run-local.sh
@@ -165,7 +161,7 @@ Prompt 模板文件位于：
 - `system`
 - `user`
 
-Prompt 模板内容通过 `go:embed` 编译进二进制。服务启动时会按配置预加载并校验模板文件语法；修改模板文件后需要重新构建并重新部署服务。当前 `project_refinement` / `asset_refinement` 已接入 Project / Asset 对话微调链路；`chapter_generation` / `chapter_continuation` / `chapter_rewrite` 已接入章节生成、续写与局部重写业务。
+Prompt 模板内容通过 `go:embed` 编译进二进制。服务启动时会按配置预加载并校验模板文件语法；修改模板文件后需要重新构建并重新部署服务。当前 `asset_generation` / `project_refinement` / `asset_refinement` 已接入资产生成与 Project / Asset 对话微调链路；`chapter_generation` / `chapter_continuation` / `chapter_rewrite` 已接入章节生成、续写与局部重写业务。
 
 数据库 schema 迁移文件位于：
 
@@ -189,6 +185,7 @@ go test ./...
 
 - 项目 / 资产 / 对话微调 HTTP handler 集成测试（基于内存仓储）
 - Conversation service 单元测试覆盖 `start / reply / get_by_id / list / confirm(project|asset)` 主路径与关键失败分支（无 pending suggestion、target 归属校验等）
+- Conversation confirm 已覆盖 optimistic locking 冲突路径（project/asset/conversation 并发更新返回冲突）
 - Chapter service 与 handler 测试覆盖公共用例 `create / get_by_id / list_by_project / update`，以及章节生成链路中的当前稿确认、重复确认幂等、未完成草稿拒绝与冲突映射
 - Chapter rewrite 成功链路测试覆盖 `GenerationRecord` 成功落库与章节确认状态重置（`current_draft_confirmed_at/by` 清空）
 - Conversation confirm handler 集成测试覆盖 asset 响应分支（`project` 为空、`asset` 返回已确认内容）
@@ -196,7 +193,7 @@ go test ./...
 - PostgreSQL repository SQL 路径测试（含 `pending_suggestion` 持久化，基于 sqlmock）
 - LLM 配置校验、OpenAI 兼容客户端工厂、Prompt Store 加载与渲染、bootstrap 装配测试
 - 配置层补充 `config.Load()` 成功/失败分支与 `ServerConfig.Address()` 单元测试
-- 本地 PostgreSQL 运行态验证流程：先执行 `go run ./cmd/migrate -config configs/config.yaml`，再启动 `go run ./cmd/server -config configs/config.yaml`
+- 本地 PostgreSQL 运行态验证流程：直接执行 `go run ./cmd/server -config configs/config.yaml`（启动阶段自动执行 migration）
 
 ## 当前刻意保留的边界
 
@@ -204,5 +201,5 @@ go test ./...
 - `POST /api/v1/chapters/:chapterID/confirm` 已实现显式的“确认当前稿”业务流；请求需通过 `X-User-ID` 请求头传入合法 UUID，系统会把该值写入 `current_draft_confirmed_by`
 - 当前稿确认仅允许作用于 `current_draft_id` 指向且状态为 `succeeded` 的生成记录；同一草稿重复确认保持幂等；若章节在确认期间被续写/改写并更新，则返回冲突错误提示重试
 - V1 仅完成埋点采集，不包含可视化看板；`token_usage` 口径当前沿用业务记录字段（默认 0）
-- 直接通过 `cmd/server` 启动 `postgres` 模式服务时不会自动执行 migration；如需自动执行可使用 `scripts/run-local.sh`
+- 直接通过 `cmd/server` 启动 `postgres` 模式服务时会在 bootstrap 阶段自动执行 migration；若迁移失败则启动直接失败
 - `memory` provider 仍然保留，但目标是用于测试而不是默认运行态持久化
