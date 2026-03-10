@@ -2,13 +2,16 @@ package handler
 
 import (
 	"context"
+	"strings"
 
 	chapterdomain "novelforge/backend/internal/domain/chapter"
 	generationdomain "novelforge/backend/internal/domain/generation"
+	"novelforge/backend/internal/infra/http/middleware"
 	chapterservice "novelforge/backend/internal/service/chapter"
 
 	"github.com/cloudwego/hertz/pkg/app"
 	"github.com/cloudwego/hertz/pkg/protocol/consts"
+	"github.com/google/uuid"
 )
 
 // ChapterHandler 处理章节(chapter) HTTP 请求。
@@ -168,6 +171,44 @@ func (h *ChapterHandler) Rewrite(c context.Context, ctx *app.RequestContext) {
 	}
 
 	ctx.JSON(consts.StatusOK, newChapterGenerationResponse(result.Chapter, result.GenerationRecord))
+}
+
+func (h *ChapterHandler) Confirm(c context.Context, ctx *app.RequestContext) {
+	userID, ok := currentUserID(ctx)
+	if !ok {
+		writeError(ctx, consts.StatusUnauthorized, "user_id must be a valid UUID")
+		return
+	}
+
+	chapter, err := h.useCase.Confirm(c, chapterservice.ConfirmParams{
+		ChapterID:   ctx.Param("chapterID"),
+		ConfirmedBy: userID,
+	})
+	if err != nil {
+		writeServiceError(ctx, err)
+		return
+	}
+
+	ctx.JSON(consts.StatusOK, newChapterResponse(chapter))
+}
+
+func currentUserID(ctx *app.RequestContext) (string, bool) {
+	value, exists := ctx.Get(middleware.UserIDContextKey)
+	if !exists {
+		return "", false
+	}
+	userID, ok := value.(string)
+	if !ok {
+		return "", false
+	}
+	userID = strings.TrimSpace(userID)
+	if userID == "" {
+		return "", false
+	}
+	if _, err := uuid.Parse(userID); err != nil {
+		return "", false
+	}
+	return userID, true
 }
 
 func newChapterGenerationResponse(chapter *chapterdomain.Chapter, record *generationdomain.GenerationRecord) chapterGenerationResponse {

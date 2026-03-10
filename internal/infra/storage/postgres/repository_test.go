@@ -492,6 +492,88 @@ func TestChapterRepositoryRoundTripOptionalFields(t *testing.T) {
 	}
 }
 
+func TestChapterRepositoryUpdateIfUnchanged(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock.New() error = %v", err)
+	}
+	defer db.Close()
+
+	repo := NewChapterRepository(db)
+	now := postgresTestTime()
+	entity := &chapterdomain.Chapter{
+		ID:             uuid.NewString(),
+		ProjectID:      uuid.NewString(),
+		Title:          "Chapter 1",
+		Ordinal:        1,
+		Status:         chapterdomain.StatusDraft,
+		Content:        "Body",
+		CurrentDraftID: uuid.NewString(),
+		CreatedAt:      now,
+		UpdatedAt:      now.Add(time.Minute),
+	}
+
+	mock.ExpectExec(regexp.QuoteMeta(`
+		UPDATE chapters
+		SET project_id = $2, title = $3, ordinal = $4, status = $5, content = $6,
+			current_draft_id = $7, current_draft_confirmed_at = $8, current_draft_confirmed_by = $9,
+			updated_at = $10
+		WHERE id = $1 AND updated_at = $11
+	`)).WithArgs(
+		entity.ID,
+		entity.ProjectID,
+		entity.Title,
+		entity.Ordinal,
+		entity.Status,
+		entity.Content,
+		sql.NullString{String: entity.CurrentDraftID, Valid: true},
+		sql.NullTime{},
+		sql.NullString{},
+		entity.UpdatedAt,
+		now,
+	).WillReturnResult(sqlmock.NewResult(0, 1))
+
+	updated, err := repo.UpdateIfUnchanged(context.Background(), entity, now)
+	if err != nil {
+		t.Fatalf("UpdateIfUnchanged() error = %v", err)
+	}
+	if !updated {
+		t.Fatal("UpdateIfUnchanged() updated = false, want true")
+	}
+
+	mock.ExpectExec(regexp.QuoteMeta(`
+		UPDATE chapters
+		SET project_id = $2, title = $3, ordinal = $4, status = $5, content = $6,
+			current_draft_id = $7, current_draft_confirmed_at = $8, current_draft_confirmed_by = $9,
+			updated_at = $10
+		WHERE id = $1 AND updated_at = $11
+	`)).WithArgs(
+		entity.ID,
+		entity.ProjectID,
+		entity.Title,
+		entity.Ordinal,
+		entity.Status,
+		entity.Content,
+		sql.NullString{String: entity.CurrentDraftID, Valid: true},
+		sql.NullTime{},
+		sql.NullString{},
+		entity.UpdatedAt,
+		now.Add(2*time.Minute),
+	).WillReturnResult(sqlmock.NewResult(0, 0))
+
+	updated, err = repo.UpdateIfUnchanged(context.Background(), entity, now.Add(2*time.Minute))
+	if err != nil {
+		t.Fatalf("UpdateIfUnchanged() stale error = %v", err)
+	}
+	if updated {
+		t.Fatal("UpdateIfUnchanged() updated = true, want false")
+	}
+
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("sql expectations not met: %v", err)
+	}
+}
+
 func TestConversationRepositoryAppendMessage(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	if err != nil {

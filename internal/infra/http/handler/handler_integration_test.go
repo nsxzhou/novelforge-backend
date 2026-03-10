@@ -9,12 +9,13 @@ import (
 	"testing"
 	"time"
 
+	apiroutes "novelforge/backend/api/http"
 	assetdomain "novelforge/backend/internal/domain/asset"
 	chapterdomain "novelforge/backend/internal/domain/chapter"
 	conversationdomain "novelforge/backend/internal/domain/conversation"
 	generationdomain "novelforge/backend/internal/domain/generation"
 	projectdomain "novelforge/backend/internal/domain/project"
-	httpinfra "novelforge/backend/internal/infra/http"
+	"novelforge/backend/internal/infra/http/middleware"
 	"novelforge/backend/internal/infra/storage/memory"
 	appservice "novelforge/backend/internal/service"
 	assetservice "novelforge/backend/internal/service/asset"
@@ -108,14 +109,14 @@ type pendingSuggestionResponse struct {
 }
 
 type conversationResponse struct {
-	ID                string                      `json:"id"`
-	ProjectID         string                      `json:"project_id"`
-	TargetType        string                      `json:"target_type"`
-	TargetID          string                      `json:"target_id"`
+	ID                string                        `json:"id"`
+	ProjectID         string                        `json:"project_id"`
+	TargetType        string                        `json:"target_type"`
+	TargetID          string                        `json:"target_id"`
 	Messages          []conversationMessageResponse `json:"messages"`
-	PendingSuggestion *pendingSuggestionResponse  `json:"pending_suggestion"`
-	CreatedAt         string                      `json:"created_at"`
-	UpdatedAt         string                      `json:"updated_at"`
+	PendingSuggestion *pendingSuggestionResponse    `json:"pending_suggestion"`
+	CreatedAt         string                        `json:"created_at"`
+	UpdatedAt         string                        `json:"updated_at"`
 }
 
 type conversationListResponse struct {
@@ -127,6 +128,8 @@ type confirmConversationResponse struct {
 	Project      *projectResponse     `json:"project,omitempty"`
 	Asset        *assetResponse       `json:"asset,omitempty"`
 }
+
+const testUserIDHeader = middleware.UserIDHeader
 
 func TestProjectAndAssetRoutesIntegration(t *testing.T) {
 	h := newTestServer()
@@ -563,11 +566,12 @@ func TestConversationRouteValidationAndErrorMappingIntegration(t *testing.T) {
 
 func TestChapterRoutesIntegration(t *testing.T) {
 	const (
-		projectID            = "11111111-1111-1111-1111-111111111111"
-		chapterID            = "22222222-2222-2222-2222-222222222222"
-		generationID         = "33333333-3333-3333-3333-333333333333"
-		continuedGeneration  = "44444444-4444-4444-4444-444444444444"
-		rewrittenGeneration  = "55555555-5555-5555-5555-555555555555"
+		projectID           = "11111111-1111-1111-1111-111111111111"
+		chapterID           = "22222222-2222-2222-2222-222222222222"
+		generationID        = "33333333-3333-3333-3333-333333333333"
+		continuedGeneration = "44444444-4444-4444-4444-444444444444"
+		rewrittenGeneration = "55555555-5555-5555-5555-555555555555"
+		confirmedBy         = "66666666-6666-6666-6666-666666666666"
 	)
 
 	baseTime := time.Date(2026, 3, 9, 14, 0, 0, 0, time.UTC)
@@ -643,6 +647,20 @@ func TestChapterRoutesIntegration(t *testing.T) {
 		CreatedAt:        baseTime.Add(2 * time.Minute),
 		UpdatedAt:        baseTime.Add(2 * time.Minute),
 	}
+	confirmedAt := baseTime.Add(3 * time.Minute)
+	confirmedChapter := &chapterdomain.Chapter{
+		ID:                      chapterID,
+		ProjectID:               projectID,
+		Title:                   "第一章 王城初见",
+		Ordinal:                 1,
+		Status:                  chapterdomain.StatusConfirmed,
+		Content:                 rewrittenChapter.Content,
+		CurrentDraftID:          rewrittenGeneration,
+		CurrentDraftConfirmedAt: &confirmedAt,
+		CurrentDraftConfirmedBy: confirmedBy,
+		CreatedAt:               baseTime,
+		UpdatedAt:               confirmedAt,
+	}
 
 	h := newTestServerWithAllUseCases(
 		stubProjectUseCase{},
@@ -677,6 +695,12 @@ func TestChapterRoutesIntegration(t *testing.T) {
 					t.Fatalf("Rewrite params = %#v, want expected payload", params)
 				}
 				return &chapterservice.RewriteResult{Chapter: rewrittenChapter, GenerationRecord: rewrittenRecord}, nil
+			},
+			confirm: func(_ context.Context, params chapterservice.ConfirmParams) (*chapterdomain.Chapter, error) {
+				if params.ChapterID != chapterID || params.ConfirmedBy != confirmedBy {
+					t.Fatalf("Confirm params = %#v, want expected payload", params)
+				}
+				return confirmedChapter, nil
 			},
 		},
 		stubConversationUseCase{},
@@ -720,6 +744,29 @@ func TestChapterRoutesIntegration(t *testing.T) {
 	decodeResponseBody(t, rewriteRecorder, &rewritten)
 	if rewritten.Chapter.Content != rewrittenChapter.Content || rewritten.GenerationRecord.Kind != generationdomain.KindChapterRewrite {
 		t.Fatalf("rewrite response = %#v, want rewrite payload", rewritten)
+	}
+
+	confirmRecorder := performJSONRequestWithHeaders(
+		h,
+		consts.MethodPost,
+		"/api/v1/chapters/"+chapterID+"/confirm",
+		"",
+		ut.Header{Key: testUserIDHeader, Value: confirmedBy},
+	)
+	assertStatusCode(t, confirmRecorder.Code, consts.StatusOK)
+	var confirmed chapterResponse
+	decodeResponseBody(t, confirmRecorder, &confirmed)
+	if confirmed.Status != chapterdomain.StatusConfirmed {
+		t.Fatalf("confirm status = %q, want %q", confirmed.Status, chapterdomain.StatusConfirmed)
+	}
+	if confirmed.CurrentDraftID != confirmedChapter.CurrentDraftID {
+		t.Fatalf("confirm current_draft_id = %q, want %q", confirmed.CurrentDraftID, confirmedChapter.CurrentDraftID)
+	}
+	if confirmed.CurrentDraftConfirmedAt == nil || *confirmed.CurrentDraftConfirmedAt != confirmedAt.Format("2006-01-02T15:04:05Z07:00") {
+		t.Fatalf("confirm current_draft_confirmed_at = %#v, want %q", confirmed.CurrentDraftConfirmedAt, confirmedAt.Format("2006-01-02T15:04:05Z07:00"))
+	}
+	if confirmed.CurrentDraftConfirmedBy != confirmedBy {
+		t.Fatalf("confirm current_draft_confirmed_by = %q, want %q", confirmed.CurrentDraftConfirmedBy, confirmedBy)
 	}
 }
 
@@ -789,6 +836,92 @@ func TestChapterRouteValidationAndErrorMappingIntegration(t *testing.T) {
 		assertErrorContains(t, recorder, "missing chapter")
 	})
 
+	t.Run("confirm missing user id returns 401", func(t *testing.T) {
+		h := newTestServerWithAllUseCases(stubProjectUseCase{}, stubAssetUseCase{}, stubChapterUseCase{}, stubConversationUseCase{})
+		recorder := performRequest(h, consts.MethodPost, "/api/v1/chapters/"+chapterID+"/confirm", "")
+		assertStatusCode(t, recorder.Code, consts.StatusUnauthorized)
+		assertErrorMessage(t, recorder, "user_id must be a valid UUID")
+	})
+
+	t.Run("confirm invalid user id returns 401", func(t *testing.T) {
+		h := newTestServerWithAllUseCases(stubProjectUseCase{}, stubAssetUseCase{}, stubChapterUseCase{}, stubConversationUseCase{})
+		recorder := performJSONRequestWithHeaders(
+			h,
+			consts.MethodPost,
+			"/api/v1/chapters/"+chapterID+"/confirm",
+			"",
+			ut.Header{Key: testUserIDHeader, Value: "not-a-uuid"},
+		)
+		assertStatusCode(t, recorder.Code, consts.StatusUnauthorized)
+		assertErrorMessage(t, recorder, "user_id must be a valid UUID")
+	})
+
+	t.Run("confirm conflict maps to 409", func(t *testing.T) {
+		h := newTestServerWithAllUseCases(
+			stubProjectUseCase{},
+			stubAssetUseCase{},
+			stubChapterUseCase{
+				confirm: func(context.Context, chapterservice.ConfirmParams) (*chapterdomain.Chapter, error) {
+					return nil, appservice.WrapConflict(errors.New("draft already confirmed"))
+				},
+			},
+			stubConversationUseCase{},
+		)
+		recorder := performJSONRequestWithHeaders(
+			h,
+			consts.MethodPost,
+			"/api/v1/chapters/"+chapterID+"/confirm",
+			"",
+			ut.Header{Key: testUserIDHeader, Value: "33333333-3333-3333-3333-333333333333"},
+		)
+		assertStatusCode(t, recorder.Code, consts.StatusConflict)
+		assertErrorContains(t, recorder, "draft already confirmed")
+	})
+
+	t.Run("confirm stale update maps to 409", func(t *testing.T) {
+		h := newTestServerWithAllUseCases(
+			stubProjectUseCase{},
+			stubAssetUseCase{},
+			stubChapterUseCase{
+				confirm: func(context.Context, chapterservice.ConfirmParams) (*chapterdomain.Chapter, error) {
+					return nil, appservice.WrapConflict(errors.New("chapter was modified during confirmation; please retry"))
+				},
+			},
+			stubConversationUseCase{},
+		)
+		recorder := performJSONRequestWithHeaders(
+			h,
+			consts.MethodPost,
+			"/api/v1/chapters/"+chapterID+"/confirm",
+			"",
+			ut.Header{Key: testUserIDHeader, Value: "33333333-3333-3333-3333-333333333333"},
+		)
+		assertStatusCode(t, recorder.Code, consts.StatusConflict)
+		assertErrorContains(t, recorder, "please retry")
+	})
+
+	t.Run("confirm not found maps to 404", func(t *testing.T) {
+		h := newTestServerWithAllUseCases(
+			stubProjectUseCase{},
+			stubAssetUseCase{},
+			stubChapterUseCase{
+				confirm: func(context.Context, chapterservice.ConfirmParams) (*chapterdomain.Chapter, error) {
+					return nil, appservice.WrapNotFound(errors.New("missing generation record"))
+				},
+			},
+			stubConversationUseCase{},
+		)
+		recorder := performJSONRequestWithHeaders(
+			h,
+			consts.MethodPost,
+			"/api/v1/chapters/"+chapterID+"/confirm",
+			"",
+			ut.Header{Key: testUserIDHeader, Value: "33333333-3333-3333-3333-333333333333"},
+		)
+		assertStatusCode(t, recorder.Code, consts.StatusNotFound)
+		assertErrorContains(t, recorder, "missing generation record")
+	})
+
 	t.Run("continue unexpected error maps to 500", func(t *testing.T) {
 		h := newTestServerWithAllUseCases(
 			stubProjectUseCase{},
@@ -833,12 +966,19 @@ func newTestServerWithAllUseCases(projectUseCase projectservice.UseCase, assetUs
 		WriteTimeoutSeconds: 1,
 	}
 
-	return httpinfra.NewServer(testConfig, httpinfra.Dependencies{
+	h := server.Default(
+		server.WithHostPorts(testConfig.Address()),
+		server.WithReadTimeout(time.Duration(testConfig.ReadTimeoutSeconds)*time.Second),
+		server.WithWriteTimeout(time.Duration(testConfig.WriteTimeoutSeconds)*time.Second),
+	)
+	h.Use(middleware.RequestID(), middleware.Recovery(), middleware.UserContext())
+	apiroutes.RegisterRoutes(h, apiroutes.Dependencies{
 		Projects:      projectUseCase,
 		Assets:        assetUseCase,
 		Chapters:      chapterUseCase,
 		Conversations: conversationUseCase,
 	})
+	return h
 }
 
 func createTestProject(t *testing.T, h *server.Hertz) projectResponse {
@@ -864,12 +1004,16 @@ func createTestAsset(t *testing.T, h *server.Hertz, projectID string) assetRespo
 }
 
 func performRequest(h *server.Hertz, method, url, body string) *ut.ResponseRecorder {
+	return performRequestWithHeaders(h, method, url, body)
+}
+
+func performRequestWithHeaders(h *server.Hertz, method, url, body string, extraHeaders ...ut.Header) *ut.ResponseRecorder {
 	var requestBody *ut.Body
 	if body != "" {
 		requestBody = &ut.Body{Body: bytes.NewBufferString(body), Len: len(body)}
 	}
 
-	headers := []ut.Header{}
+	headers := append([]ut.Header{}, extraHeaders...)
 	if body != "" {
 		headers = append(headers, ut.Header{Key: "Content-Type", Value: consts.MIMEApplicationJSON})
 	}
@@ -878,6 +1022,10 @@ func performRequest(h *server.Hertz, method, url, body string) *ut.ResponseRecor
 
 func performJSONRequest(h *server.Hertz, method, url, body string) *ut.ResponseRecorder {
 	return performRequest(h, method, url, body)
+}
+
+func performJSONRequestWithHeaders(h *server.Hertz, method, url, body string, extraHeaders ...ut.Header) *ut.ResponseRecorder {
+	return performRequestWithHeaders(h, method, url, body, extraHeaders...)
 }
 
 func assertStatusCode(t *testing.T, got, want int) {
@@ -1015,6 +1163,7 @@ type stubChapterUseCase struct {
 	generate      func(context.Context, chapterservice.GenerateParams) (*chapterservice.GenerateResult, error)
 	continueFn    func(context.Context, chapterservice.ContinueParams) (*chapterservice.ContinueResult, error)
 	rewrite       func(context.Context, chapterservice.RewriteParams) (*chapterservice.RewriteResult, error)
+	confirm       func(context.Context, chapterservice.ConfirmParams) (*chapterdomain.Chapter, error)
 }
 
 func (s stubChapterUseCase) Create(ctx context.Context, chapter *chapterdomain.Chapter) error {
@@ -1064,6 +1213,13 @@ func (s stubChapterUseCase) Rewrite(ctx context.Context, params chapterservice.R
 		return s.rewrite(ctx, params)
 	}
 	return nil, errors.New("unexpected Rewrite call")
+}
+
+func (s stubChapterUseCase) Confirm(ctx context.Context, params chapterservice.ConfirmParams) (*chapterdomain.Chapter, error) {
+	if s.confirm != nil {
+		return s.confirm(ctx, params)
+	}
+	return nil, errors.New("unexpected Confirm call")
 }
 
 type stubConversationUseCase struct {

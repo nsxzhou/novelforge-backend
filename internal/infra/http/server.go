@@ -21,7 +21,7 @@ func NewServer(cfg config.ServerConfig, deps Dependencies) *server.Hertz {
 		server.WithWriteTimeout(time.Duration(cfg.WriteTimeoutSeconds)*time.Second),
 	)
 	// 注册全局中间件
-	h.Use(middleware.RequestID(), middleware.Recovery())
+	h.Use(middleware.RequestID(), middleware.Recovery(), middleware.UserContext())
 
 	apiroutes.RegisterRoutes(h, deps)
 

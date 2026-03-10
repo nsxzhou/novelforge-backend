@@ -231,6 +231,7 @@ func (u *useCase) Continue(ctx context.Context, params ContinueParams) (*Continu
 	if err != nil {
 		return nil, appservice.TranslateStorageError(err)
 	}
+	expectedUpdatedAt := chapterEntity.UpdatedAt
 	projectEntity, promptContext, err := u.loadProjectAndPromptContext(ctx, chapterEntity.ProjectID)
 	if err != nil {
 		return nil, err
@@ -263,8 +264,12 @@ func (u *useCase) Continue(ctx context.Context, params ContinueParams) (*Continu
 	if err := updated.Validate(); err != nil {
 		return nil, u.failGeneration(ctx, record, content, startedAt, appservice.WrapInvalidInput(err))
 	}
-	if err := u.chapters.Update(ctx, &updated); err != nil {
+	updatedOK, err := u.chapters.UpdateIfUnchanged(ctx, &updated, expectedUpdatedAt)
+	if err != nil {
 		return nil, u.failGeneration(ctx, record, content, startedAt, appservice.TranslateStorageError(err))
+	}
+	if !updatedOK {
+		return nil, u.failGeneration(ctx, record, content, startedAt, appservice.WrapConflict(fmt.Errorf("chapter was modified during continuation; please retry")))
 	}
 	if err := u.succeedGeneration(ctx, record, content, startedAt); err != nil {
 		return nil, err
@@ -292,6 +297,7 @@ func (u *useCase) Rewrite(ctx context.Context, params RewriteParams) (*RewriteRe
 	if err != nil {
 		return nil, appservice.TranslateStorageError(err)
 	}
+	expectedUpdatedAt := chapterEntity.UpdatedAt
 	if !strings.Contains(chapterEntity.Content, params.TargetText) {
 		return nil, appservice.WrapInvalidInput(fmt.Errorf("target_text must exactly match existing chapter content"))
 	}
@@ -328,14 +334,75 @@ func (u *useCase) Rewrite(ctx context.Context, params RewriteParams) (*RewriteRe
 	if err := updated.Validate(); err != nil {
 		return nil, u.failGeneration(ctx, record, content, startedAt, appservice.WrapInvalidInput(err))
 	}
-	if err := u.chapters.Update(ctx, &updated); err != nil {
+	updatedOK, err := u.chapters.UpdateIfUnchanged(ctx, &updated, expectedUpdatedAt)
+	if err != nil {
 		return nil, u.failGeneration(ctx, record, content, startedAt, appservice.TranslateStorageError(err))
+	}
+	if !updatedOK {
+		return nil, u.failGeneration(ctx, record, content, startedAt, appservice.WrapConflict(fmt.Errorf("chapter was modified during rewrite; please retry")))
 	}
 	if err := u.succeedGeneration(ctx, record, content, startedAt); err != nil {
 		return nil, err
 	}
 
 	return &RewriteResult{Chapter: &updated, GenerationRecord: record}, nil
+}
+
+func (u *useCase) Confirm(ctx context.Context, params ConfirmParams) (*chapterdomain.Chapter, error) {
+	params.ChapterID = strings.TrimSpace(params.ChapterID)
+	params.ConfirmedBy = strings.TrimSpace(params.ConfirmedBy)
+
+	if err := validateChapterID(params.ChapterID); err != nil {
+		return nil, err
+	}
+	if err := validateConfirmedBy(params.ConfirmedBy); err != nil {
+		return nil, err
+	}
+
+	chapterEntity, err := u.chapters.GetByID(ctx, params.ChapterID)
+	if err != nil {
+		return nil, appservice.TranslateStorageError(err)
+	}
+	expectedUpdatedAt := chapterEntity.UpdatedAt
+	if chapterEntity.CurrentDraftID == "" {
+		return nil, appservice.WrapConflict(fmt.Errorf("current_draft_id must not be empty"))
+	}
+	if chapterEntity.Status == chapterdomain.StatusConfirmed {
+		if chapterEntity.CurrentDraftConfirmedAt != nil && chapterEntity.CurrentDraftConfirmedBy != "" {
+			return chapterEntity, nil
+		}
+		return nil, appservice.WrapConflict(fmt.Errorf("chapter is already confirmed"))
+	}
+
+	record, err := u.generationRecords.GetByID(ctx, chapterEntity.CurrentDraftID)
+	if err != nil {
+		return nil, appservice.TranslateStorageError(err)
+	}
+	if record.ChapterID != chapterEntity.ID {
+		return nil, appservice.WrapConflict(fmt.Errorf("current draft generation record does not belong to chapter"))
+	}
+	if record.Status != generationdomain.StatusSucceeded {
+		return nil, appservice.WrapConflict(fmt.Errorf("current draft generation record must be succeeded before confirmation"))
+	}
+
+	now := time.Now().UTC()
+	updated := *chapterEntity
+	updated.Status = chapterdomain.StatusConfirmed
+	updated.CurrentDraftConfirmedAt = &now
+	updated.CurrentDraftConfirmedBy = params.ConfirmedBy
+	updated.UpdatedAt = now
+	if err := updated.Validate(); err != nil {
+		return nil, appservice.WrapInvalidInput(err)
+	}
+	updatedOK, err := u.chapters.UpdateIfUnchanged(ctx, &updated, expectedUpdatedAt)
+	if err != nil {
+		return nil, appservice.TranslateStorageError(err)
+	}
+	if !updatedOK {
+		return nil, appservice.WrapConflict(fmt.Errorf("chapter was modified during confirmation; please retry"))
+	}
+
+	return &updated, nil
 }
 
 func (u *useCase) ensureProjectExists(ctx context.Context, projectID string) error {
@@ -429,13 +496,13 @@ func buildGeneratePromptData(projectEntity *projectdomain.Project, promptContext
 
 func buildContinuePromptData(projectEntity *projectdomain.Project, promptContext chapterPromptContext, chapterEntity *chapterdomain.Chapter, params ContinueParams) map[string]string {
 	return map[string]string{
-		"ProjectTitle":         projectEntity.Title,
-		"ProjectSummary":       projectEntity.Summary,
-		"ChapterTitle":         chapterEntity.Title,
-		"ChapterOrdinal":       strconv.Itoa(chapterEntity.Ordinal),
-		"OutlineContext":       promptContext.OutlineContext,
-		"WorldbuildingContext": promptContext.WorldbuildingContext,
-		"CharacterContext":     promptContext.CharacterContext,
+		"ProjectTitle":          projectEntity.Title,
+		"ProjectSummary":        projectEntity.Summary,
+		"ChapterTitle":          chapterEntity.Title,
+		"ChapterOrdinal":        strconv.Itoa(chapterEntity.Ordinal),
+		"OutlineContext":        promptContext.OutlineContext,
+		"WorldbuildingContext":  promptContext.WorldbuildingContext,
+		"CharacterContext":      promptContext.CharacterContext,
 		"CurrentChapterContent": chapterEntity.Content,
 		"Instruction":           params.Instruction,
 	}
@@ -443,16 +510,16 @@ func buildContinuePromptData(projectEntity *projectdomain.Project, promptContext
 
 func buildRewritePromptData(projectEntity *projectdomain.Project, promptContext chapterPromptContext, chapterEntity *chapterdomain.Chapter, params RewriteParams) map[string]string {
 	return map[string]string{
-		"ProjectTitle":         projectEntity.Title,
-		"ProjectSummary":       projectEntity.Summary,
-		"ChapterTitle":         chapterEntity.Title,
-		"ChapterOrdinal":       strconv.Itoa(chapterEntity.Ordinal),
-		"OutlineContext":       promptContext.OutlineContext,
-		"WorldbuildingContext": promptContext.WorldbuildingContext,
-		"CharacterContext":     promptContext.CharacterContext,
+		"ProjectTitle":          projectEntity.Title,
+		"ProjectSummary":        projectEntity.Summary,
+		"ChapterTitle":          chapterEntity.Title,
+		"ChapterOrdinal":        strconv.Itoa(chapterEntity.Ordinal),
+		"OutlineContext":        promptContext.OutlineContext,
+		"WorldbuildingContext":  promptContext.WorldbuildingContext,
+		"CharacterContext":      promptContext.CharacterContext,
 		"CurrentChapterContent": chapterEntity.Content,
-		"TargetText":           params.TargetText,
-		"Instruction":          params.Instruction,
+		"TargetText":            params.TargetText,
+		"Instruction":           params.Instruction,
 	}
 }
 
@@ -575,6 +642,13 @@ func validateChapterID(id string) error {
 func validateChapterProjectID(projectID string) error {
 	if _, err := uuid.Parse(strings.TrimSpace(projectID)); err != nil {
 		return appservice.WrapInvalidInput(fmt.Errorf("project_id must be a valid UUID"))
+	}
+	return nil
+}
+
+func validateConfirmedBy(confirmedBy string) error {
+	if _, err := uuid.Parse(strings.TrimSpace(confirmedBy)); err != nil {
+		return appservice.WrapInvalidInput(fmt.Errorf("confirmed_by must be a valid UUID"))
 	}
 	return nil
 }

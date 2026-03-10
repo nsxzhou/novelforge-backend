@@ -198,6 +198,46 @@ func TestChapterRepositoryUpdate(t *testing.T) {
 	}
 }
 
+func TestChapterRepositoryUpdateIfUnchanged(t *testing.T) {
+	repo := NewChapterRepository()
+	ctx := context.Background()
+	chapter := testChapter(uuid.NewString())
+
+	if err := repo.Create(ctx, chapter); err != nil {
+		t.Fatalf("Create() error = %v", err)
+	}
+
+	expectedUpdatedAt := chapter.UpdatedAt
+	chapter.Title = "Chapter 1 Revised"
+	chapter.UpdatedAt = chapter.UpdatedAt.Add(time.Minute)
+
+	updated, err := repo.UpdateIfUnchanged(ctx, chapter, expectedUpdatedAt)
+	if err != nil {
+		t.Fatalf("UpdateIfUnchanged() error = %v", err)
+	}
+	if !updated {
+		t.Fatal("UpdateIfUnchanged() updated = false, want true")
+	}
+
+	got, err := repo.GetByID(ctx, chapter.ID)
+	if err != nil {
+		t.Fatalf("GetByID() error = %v", err)
+	}
+	if got.Title != chapter.Title {
+		t.Fatalf("GetByID().Title = %q, want %q", got.Title, chapter.Title)
+	}
+
+	chapter.Title = "Chapter 1 Stale"
+	chapter.UpdatedAt = chapter.UpdatedAt.Add(time.Minute)
+	updated, err = repo.UpdateIfUnchanged(ctx, chapter, expectedUpdatedAt)
+	if err != nil {
+		t.Fatalf("UpdateIfUnchanged() stale error = %v", err)
+	}
+	if updated {
+		t.Fatal("UpdateIfUnchanged() updated = true, want false for stale write")
+	}
+}
+
 func TestConversationRepositoryAppendMessage(t *testing.T) {
 	repo := NewConversationRepository()
 	ctx := context.Background()

@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"sync"
+	"time"
 
 	"novelforge/backend/internal/domain/chapter"
 )
@@ -87,4 +88,30 @@ func (r *ChapterRepository) Update(_ context.Context, entity *chapter.Chapter) e
 
 	r.items[entity.ID] = cloneChapter(entity)
 	return nil
+}
+
+func (r *ChapterRepository) UpdateIfUnchanged(_ context.Context, entity *chapter.Chapter, expectedUpdatedAt time.Time) (bool, error) {
+	if entity == nil {
+		return false, fmt.Errorf("chapter must not be nil")
+	}
+	if err := entity.Validate(); err != nil {
+		return false, err
+	}
+	if expectedUpdatedAt.IsZero() {
+		return false, fmt.Errorf("expected_updated_at must not be zero")
+	}
+
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	current, exists := r.items[entity.ID]
+	if !exists {
+		return false, ErrNotFound
+	}
+	if !current.UpdatedAt.Equal(expectedUpdatedAt) {
+		return false, nil
+	}
+
+	r.items[entity.ID] = cloneChapter(entity)
+	return true, nil
 }

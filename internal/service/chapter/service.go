@@ -31,15 +31,21 @@ type GenerateParams struct {
 
 // ContinueParams 定义续写章节所需参数。
 type ContinueParams struct {
-	ChapterID    string
-	Instruction  string
+	ChapterID   string
+	Instruction string
 }
 
 // RewriteParams 定义改写章节所需参数。
 type RewriteParams struct {
-	ChapterID    string
-	Instruction  string
-	TargetText   string
+	ChapterID   string
+	Instruction string
+	TargetText  string
+}
+
+// ConfirmParams 定义确认当前章节草稿所需参数。
+type ConfirmParams struct {
+	ChapterID   string
+	ConfirmedBy string
 }
 
 // GenerateResult 定义章节生成结果。
@@ -69,4 +75,5 @@ type UseCase interface {
 	Generate(ctx context.Context, params GenerateParams) (*GenerateResult, error)
 	Continue(ctx context.Context, params ContinueParams) (*ContinueResult, error)
 	Rewrite(ctx context.Context, params RewriteParams) (*RewriteResult, error)
+	Confirm(ctx context.Context, params ConfirmParams) (*chapterdomain.Chapter, error)
 }

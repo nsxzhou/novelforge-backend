@@ -108,6 +108,14 @@ func createChapterEntity(t *testing.T, repo chapterdomain.ChapterRepository, ent
 	return entity
 }
 
+func createGenerationRecordEntity(t *testing.T, repo generationdomain.GenerationRecordRepository, entity *generationdomain.GenerationRecord) *generationdomain.GenerationRecord {
+	t.Helper()
+	if err := repo.Create(context.Background(), entity); err != nil {
+		t.Fatalf("Create(generation_record) error = %v", err)
+	}
+	return entity
+}
+
 func TestUseCaseGenerateCreatesChapterAndGenerationRecord(t *testing.T) {
 	projectRepo := memory.NewProjectRepository()
 	assetRepo := memory.NewAssetRepository()
@@ -292,6 +300,303 @@ func TestUseCaseContinueResetsConfirmationAndPersistsRecord(t *testing.T) {
 	}
 	if result.GenerationRecord.Kind != generationdomain.KindChapterContinuation || result.GenerationRecord.Status != generationdomain.StatusSucceeded {
 		t.Fatalf("generation record = %#v, want succeeded continuation record", result.GenerationRecord)
+	}
+}
+
+func TestUseCaseConfirmMarksChapterAsConfirmed(t *testing.T) {
+	projectRepo := memory.NewProjectRepository()
+	assetRepo := memory.NewAssetRepository()
+	chapterRepo := memory.NewChapterRepository()
+	generationRepo := memory.NewGenerationRecordRepository()
+	project := createProjectEntity(t, projectRepo, "11111111-1111-1111-1111-111111111111")
+	chapter := createChapterEntity(t, chapterRepo, &chapterdomain.Chapter{
+		ID:             "22222222-2222-2222-2222-222222222222",
+		ProjectID:      project.ID,
+		Title:          "第一章",
+		Ordinal:        1,
+		Status:         chapterdomain.StatusDraft,
+		Content:        "当前章节正文。",
+		CurrentDraftID: "33333333-3333-3333-3333-333333333333",
+		CreatedAt:      time.Date(2026, 3, 9, 12, 0, 0, 0, time.UTC),
+		UpdatedAt:      time.Date(2026, 3, 9, 12, 0, 0, 0, time.UTC),
+	})
+	createGenerationRecordEntity(t, generationRepo, &generationdomain.GenerationRecord{
+		ID:               chapter.CurrentDraftID,
+		ProjectID:        project.ID,
+		ChapterID:        chapter.ID,
+		Kind:             generationdomain.KindChapterGeneration,
+		Status:           generationdomain.StatusSucceeded,
+		InputSnapshotRef: "prompt snapshot",
+		OutputRef:        "当前章节正文。",
+		TokenUsage:       0,
+		DurationMillis:   0,
+		ErrorMessage:     "",
+		CreatedAt:        chapter.CreatedAt,
+		UpdatedAt:        chapter.UpdatedAt,
+	})
+	useCase := NewUseCase(Dependencies{
+		Chapters:          chapterRepo,
+		Projects:          projectRepo,
+		Assets:            assetRepo,
+		GenerationRecords: generationRepo,
+	})
+
+	confirmedBy := "44444444-4444-4444-4444-444444444444"
+	result, err := useCase.Confirm(context.Background(), ConfirmParams{ChapterID: chapter.ID, ConfirmedBy: confirmedBy})
+	if err != nil {
+		t.Fatalf("Confirm() error = %v", err)
+	}
+	if result.Status != chapterdomain.StatusConfirmed {
+		t.Fatalf("Status = %q, want %q", result.Status, chapterdomain.StatusConfirmed)
+	}
+	if result.CurrentDraftID != chapter.CurrentDraftID {
+		t.Fatalf("CurrentDraftID = %q, want %q", result.CurrentDraftID, chapter.CurrentDraftID)
+	}
+	if result.CurrentDraftConfirmedAt == nil {
+		t.Fatal("CurrentDraftConfirmedAt = nil, want timestamp")
+	}
+	if result.CurrentDraftConfirmedBy != confirmedBy {
+		t.Fatalf("CurrentDraftConfirmedBy = %q, want %q", result.CurrentDraftConfirmedBy, confirmedBy)
+	}
+
+	stored, err := chapterRepo.GetByID(context.Background(), chapter.ID)
+	if err != nil {
+		t.Fatalf("GetByID(chapter) error = %v", err)
+	}
+	if stored.Status != chapterdomain.StatusConfirmed {
+		t.Fatalf("stored status = %q, want %q", stored.Status, chapterdomain.StatusConfirmed)
+	}
+	if stored.CurrentDraftConfirmedAt == nil {
+		t.Fatal("stored CurrentDraftConfirmedAt = nil, want timestamp")
+	}
+	if stored.CurrentDraftConfirmedBy != confirmedBy {
+		t.Fatalf("stored CurrentDraftConfirmedBy = %q, want %q", stored.CurrentDraftConfirmedBy, confirmedBy)
+	}
+}
+
+func TestUseCaseConfirmReturnsCurrentChapterWhenDraftAlreadyConfirmed(t *testing.T) {
+	projectRepo := memory.NewProjectRepository()
+	assetRepo := memory.NewAssetRepository()
+	chapterRepo := memory.NewChapterRepository()
+	generationRepo := memory.NewGenerationRecordRepository()
+	project := createProjectEntity(t, projectRepo, "11111111-1111-1111-1111-111111111111")
+	confirmedAt := time.Date(2026, 3, 9, 12, 5, 0, 0, time.UTC)
+	chapter := createChapterEntity(t, chapterRepo, &chapterdomain.Chapter{
+		ID:                      "22222222-2222-2222-2222-222222222222",
+		ProjectID:               project.ID,
+		Title:                   "第一章",
+		Ordinal:                 1,
+		Status:                  chapterdomain.StatusConfirmed,
+		Content:                 "当前章节正文。",
+		CurrentDraftID:          "33333333-3333-3333-3333-333333333333",
+		CurrentDraftConfirmedAt: &confirmedAt,
+		CurrentDraftConfirmedBy: "44444444-4444-4444-4444-444444444444",
+		CreatedAt:               time.Date(2026, 3, 9, 12, 0, 0, 0, time.UTC),
+		UpdatedAt:               confirmedAt,
+	})
+	createGenerationRecordEntity(t, generationRepo, &generationdomain.GenerationRecord{
+		ID:               chapter.CurrentDraftID,
+		ProjectID:        project.ID,
+		ChapterID:        chapter.ID,
+		Kind:             generationdomain.KindChapterGeneration,
+		Status:           generationdomain.StatusSucceeded,
+		InputSnapshotRef: "prompt snapshot",
+		OutputRef:        chapter.Content,
+		TokenUsage:       0,
+		DurationMillis:   0,
+		ErrorMessage:     "",
+		CreatedAt:        chapter.CreatedAt,
+		UpdatedAt:        chapter.UpdatedAt,
+	})
+	useCase := NewUseCase(Dependencies{
+		Chapters:          chapterRepo,
+		Projects:          projectRepo,
+		Assets:            assetRepo,
+		GenerationRecords: generationRepo,
+	})
+
+	result, err := useCase.Confirm(context.Background(), ConfirmParams{ChapterID: chapter.ID, ConfirmedBy: "55555555-5555-5555-5555-555555555555"})
+	if err != nil {
+		t.Fatalf("Confirm() error = %v", err)
+	}
+	if result.CurrentDraftConfirmedBy != chapter.CurrentDraftConfirmedBy {
+		t.Fatalf("CurrentDraftConfirmedBy = %q, want %q", result.CurrentDraftConfirmedBy, chapter.CurrentDraftConfirmedBy)
+	}
+	if result.CurrentDraftConfirmedAt == nil || !result.CurrentDraftConfirmedAt.Equal(confirmedAt) {
+		t.Fatalf("CurrentDraftConfirmedAt = %#v, want %v", result.CurrentDraftConfirmedAt, confirmedAt)
+	}
+}
+
+func TestUseCaseConfirmRejectsMissingCurrentDraft(t *testing.T) {
+	projectRepo := memory.NewProjectRepository()
+	assetRepo := memory.NewAssetRepository()
+	chapterRepo := memory.NewChapterRepository()
+	generationRepo := memory.NewGenerationRecordRepository()
+	project := createProjectEntity(t, projectRepo, "11111111-1111-1111-1111-111111111111")
+	chapter := createChapterEntity(t, chapterRepo, &chapterdomain.Chapter{
+		ID:        "22222222-2222-2222-2222-222222222222",
+		ProjectID: project.ID,
+		Title:     "第一章",
+		Ordinal:   1,
+		Status:    chapterdomain.StatusDraft,
+		Content:   "当前章节正文。",
+		CreatedAt: time.Date(2026, 3, 9, 12, 0, 0, 0, time.UTC),
+		UpdatedAt: time.Date(2026, 3, 9, 12, 0, 0, 0, time.UTC),
+	})
+	useCase := NewUseCase(Dependencies{
+		Chapters:          chapterRepo,
+		Projects:          projectRepo,
+		Assets:            assetRepo,
+		GenerationRecords: generationRepo,
+	})
+
+	_, err := useCase.Confirm(context.Background(), ConfirmParams{ChapterID: chapter.ID, ConfirmedBy: "33333333-3333-3333-3333-333333333333"})
+	if !errors.Is(err, appservice.ErrConflict) {
+		t.Fatalf("Confirm() error = %v, want conflict", err)
+	}
+	if !strings.Contains(err.Error(), "current_draft_id must not be empty") {
+		t.Fatalf("Confirm() error = %v, want current draft conflict", err)
+	}
+}
+
+func TestUseCaseConfirmRejectsInvalidConfirmedBy(t *testing.T) {
+	useCase := NewUseCase(Dependencies{
+		Chapters:          memory.NewChapterRepository(),
+		Projects:          memory.NewProjectRepository(),
+		Assets:            memory.NewAssetRepository(),
+		GenerationRecords: memory.NewGenerationRecordRepository(),
+	})
+
+	_, err := useCase.Confirm(context.Background(), ConfirmParams{ChapterID: "11111111-1111-1111-1111-111111111111", ConfirmedBy: "not-a-uuid"})
+	if !errors.Is(err, appservice.ErrInvalidInput) {
+		t.Fatalf("Confirm() error = %v, want invalid input", err)
+	}
+	if !strings.Contains(err.Error(), "confirmed_by must be a valid UUID") {
+		t.Fatalf("Confirm() error = %v, want confirmed_by validation", err)
+	}
+}
+
+func TestUseCaseConfirmReturnsNotFoundWhenGenerationRecordMissing(t *testing.T) {
+	projectRepo := memory.NewProjectRepository()
+	assetRepo := memory.NewAssetRepository()
+	chapterRepo := memory.NewChapterRepository()
+	generationRepo := memory.NewGenerationRecordRepository()
+	project := createProjectEntity(t, projectRepo, "11111111-1111-1111-1111-111111111111")
+	chapter := createChapterEntity(t, chapterRepo, &chapterdomain.Chapter{
+		ID:             "22222222-2222-2222-2222-222222222222",
+		ProjectID:      project.ID,
+		Title:          "第一章",
+		Ordinal:        1,
+		Status:         chapterdomain.StatusDraft,
+		Content:        "当前章节正文。",
+		CurrentDraftID: "33333333-3333-3333-3333-333333333333",
+		CreatedAt:      time.Date(2026, 3, 9, 12, 0, 0, 0, time.UTC),
+		UpdatedAt:      time.Date(2026, 3, 9, 12, 0, 0, 0, time.UTC),
+	})
+	useCase := NewUseCase(Dependencies{
+		Chapters:          chapterRepo,
+		Projects:          projectRepo,
+		Assets:            assetRepo,
+		GenerationRecords: generationRepo,
+	})
+
+	_, err := useCase.Confirm(context.Background(), ConfirmParams{ChapterID: chapter.ID, ConfirmedBy: "44444444-4444-4444-4444-444444444444"})
+	if !errors.Is(err, appservice.ErrNotFound) {
+		t.Fatalf("Confirm() error = %v, want not found", err)
+	}
+}
+
+func TestUseCaseConfirmRejectsUnsucceededGenerationRecord(t *testing.T) {
+	projectRepo := memory.NewProjectRepository()
+	assetRepo := memory.NewAssetRepository()
+	chapterRepo := memory.NewChapterRepository()
+	generationRepo := memory.NewGenerationRecordRepository()
+	project := createProjectEntity(t, projectRepo, "11111111-1111-1111-1111-111111111111")
+	chapter := createChapterEntity(t, chapterRepo, &chapterdomain.Chapter{
+		ID:             "22222222-2222-2222-2222-222222222222",
+		ProjectID:      project.ID,
+		Title:          "第一章",
+		Ordinal:        1,
+		Status:         chapterdomain.StatusDraft,
+		Content:        "当前章节正文。",
+		CurrentDraftID: "33333333-3333-3333-3333-333333333333",
+		CreatedAt:      time.Date(2026, 3, 9, 12, 0, 0, 0, time.UTC),
+		UpdatedAt:      time.Date(2026, 3, 9, 12, 0, 0, 0, time.UTC),
+	})
+	createGenerationRecordEntity(t, generationRepo, &generationdomain.GenerationRecord{
+		ID:               chapter.CurrentDraftID,
+		ProjectID:        project.ID,
+		ChapterID:        chapter.ID,
+		Kind:             generationdomain.KindChapterGeneration,
+		Status:           generationdomain.StatusRunning,
+		InputSnapshotRef: "prompt snapshot",
+		OutputRef:        "",
+		TokenUsage:       0,
+		DurationMillis:   0,
+		ErrorMessage:     "",
+		CreatedAt:        chapter.CreatedAt,
+		UpdatedAt:        chapter.UpdatedAt,
+	})
+	useCase := NewUseCase(Dependencies{
+		Chapters:          chapterRepo,
+		Projects:          projectRepo,
+		Assets:            assetRepo,
+		GenerationRecords: generationRepo,
+	})
+
+	_, err := useCase.Confirm(context.Background(), ConfirmParams{ChapterID: chapter.ID, ConfirmedBy: "44444444-4444-4444-4444-444444444444"})
+	if !errors.Is(err, appservice.ErrConflict) {
+		t.Fatalf("Confirm() error = %v, want conflict", err)
+	}
+	if !strings.Contains(err.Error(), "must be succeeded") {
+		t.Fatalf("Confirm() error = %v, want succeeded status conflict", err)
+	}
+}
+
+func TestUseCaseConfirmRejectsGenerationRecordChapterMismatch(t *testing.T) {
+	projectRepo := memory.NewProjectRepository()
+	assetRepo := memory.NewAssetRepository()
+	chapterRepo := memory.NewChapterRepository()
+	generationRepo := memory.NewGenerationRecordRepository()
+	project := createProjectEntity(t, projectRepo, "11111111-1111-1111-1111-111111111111")
+	chapter := createChapterEntity(t, chapterRepo, &chapterdomain.Chapter{
+		ID:             "22222222-2222-2222-2222-222222222222",
+		ProjectID:      project.ID,
+		Title:          "第一章",
+		Ordinal:        1,
+		Status:         chapterdomain.StatusDraft,
+		Content:        "当前章节正文。",
+		CurrentDraftID: "33333333-3333-3333-3333-333333333333",
+		CreatedAt:      time.Date(2026, 3, 9, 12, 0, 0, 0, time.UTC),
+		UpdatedAt:      time.Date(2026, 3, 9, 12, 0, 0, 0, time.UTC),
+	})
+	createGenerationRecordEntity(t, generationRepo, &generationdomain.GenerationRecord{
+		ID:               chapter.CurrentDraftID,
+		ProjectID:        project.ID,
+		ChapterID:        "55555555-5555-5555-5555-555555555555",
+		Kind:             generationdomain.KindChapterContinuation,
+		Status:           generationdomain.StatusSucceeded,
+		InputSnapshotRef: "prompt snapshot",
+		OutputRef:        "当前章节正文。",
+		TokenUsage:       0,
+		DurationMillis:   0,
+		ErrorMessage:     "",
+		CreatedAt:        chapter.CreatedAt,
+		UpdatedAt:        chapter.UpdatedAt,
+	})
+	useCase := NewUseCase(Dependencies{
+		Chapters:          chapterRepo,
+		Projects:          projectRepo,
+		Assets:            assetRepo,
+		GenerationRecords: generationRepo,
+	})
+
+	_, err := useCase.Confirm(context.Background(), ConfirmParams{ChapterID: chapter.ID, ConfirmedBy: "44444444-4444-4444-4444-444444444444"})
+	if !errors.Is(err, appservice.ErrConflict) {
+		t.Fatalf("Confirm() error = %v, want conflict", err)
+	}
+	if !strings.Contains(err.Error(), "does not belong to chapter") {
+		t.Fatalf("Confirm() error = %v, want chapter mismatch conflict", err)
 	}
 }
 

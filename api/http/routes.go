@@ -45,6 +45,7 @@ func RegisterRoutes(h *server.Hertz, deps Dependencies) {
 	v1.PUT("/assets/:assetID", assetHandler.Update)
 	v1.DELETE("/assets/:assetID", assetHandler.Delete)
 	v1.GET("/chapters/:chapterID", chapterHandler.GetByID)
+	v1.POST("/chapters/:chapterID/confirm", chapterHandler.Confirm)
 	v1.POST("/chapters/:chapterID/continue", chapterHandler.Continue)
 	v1.POST("/chapters/:chapterID/rewrite", chapterHandler.Rewrite)
 	v1.GET("/conversations/:conversationID", conversationHandler.GetByID)
