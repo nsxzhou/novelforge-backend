@@ -8,6 +8,7 @@ import (
 	projectdomain "novelforge/backend/internal/domain/project"
 	"novelforge/backend/internal/infra/llm"
 	"novelforge/backend/internal/infra/llm/prompts"
+	metricservice "novelforge/backend/internal/service/metric"
 )
 
 // Dependencies 声明对话(conversation)细化用例所需的依赖项。
@@ -17,6 +18,7 @@ type Dependencies struct {
 	Assets        assetdomain.AssetRepository
 	LLMClient     llm.Client
 	PromptStore   *prompts.Store
+	Metrics       metricservice.UseCase
 }
 
 // StartParams 定义发起细化对话所需参数。

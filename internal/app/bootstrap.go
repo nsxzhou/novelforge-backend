@@ -12,6 +12,7 @@ import (
 	assetservice "novelforge/backend/internal/service/asset"
 	chapterservice "novelforge/backend/internal/service/chapter"
 	conversationservice "novelforge/backend/internal/service/conversation"
+	metricservice "novelforge/backend/internal/service/metric"
 	projectservice "novelforge/backend/internal/service/project"
 	"novelforge/backend/pkg/config"
 
@@ -74,6 +75,9 @@ func LoadBootstrap(configPath string) (*Bootstrap, error) {
 		Assets:   repositories.Assets,
 		Projects: repositories.Projects,
 	})
+	metricUseCase := metricservice.NewUseCase(metricservice.Dependencies{
+		MetricEvents: repositories.MetricEvents,
+	})
 	chapterUseCase := chapterservice.NewUseCase(chapterservice.Dependencies{
 		Chapters:          repositories.Chapters,
 		Projects:          repositories.Projects,
@@ -81,6 +85,7 @@ func LoadBootstrap(configPath string) (*Bootstrap, error) {
 		GenerationRecords: repositories.GenerationRecords,
 		LLMClient:         llmClient,
 		PromptStore:       promptStore,
+		Metrics:           metricUseCase,
 	})
 	conversationUseCase := conversationservice.NewUseCase(conversationservice.Dependencies{
 		Conversations: repositories.Conversations,
@@ -88,6 +93,7 @@ func LoadBootstrap(configPath string) (*Bootstrap, error) {
 		Assets:        repositories.Assets,
 		LLMClient:     llmClient,
 		PromptStore:   promptStore,
+		Metrics:       metricUseCase,
 	})
 
 	httpServer := httpinfra.NewServer(cfg.Server, httpinfra.Dependencies{

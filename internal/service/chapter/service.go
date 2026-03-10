@@ -9,6 +9,7 @@ import (
 	projectdomain "novelforge/backend/internal/domain/project"
 	"novelforge/backend/internal/infra/llm"
 	"novelforge/backend/internal/infra/llm/prompts"
+	metricservice "novelforge/backend/internal/service/metric"
 )
 
 // Dependencies 声明章节(chapter)用例所需的领域依赖项。
@@ -19,6 +20,7 @@ type Dependencies struct {
 	GenerationRecords generationdomain.GenerationRecordRepository
 	LLMClient         llm.Client
 	PromptStore       *prompts.Store
+	Metrics           metricservice.UseCase
 }
 
 // GenerateParams 定义生成章节所需参数。

@@ -14,6 +14,10 @@ const (
 	EventChapterGenerated = "chapter_generated"
 	EventChapterConfirmed = "chapter_confirmed"
 	EventGenerationFailed = "generation_failed"
+	// EventOperationCompleted 统一表示业务动作成功完成。
+	EventOperationCompleted = "operation_completed"
+	// EventOperationFailed 统一表示业务动作执行失败。
+	EventOperationFailed = "operation_failed"
 )
 
 // MetricEvent 存储一个仅追加(append-only)的领域指标(metric)事件。
