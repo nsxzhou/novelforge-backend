@@ -20,8 +20,9 @@ func NewServer(cfg config.ServerConfig, deps Dependencies) *server.Hertz {
 		server.WithReadTimeout(time.Duration(cfg.ReadTimeoutSeconds)*time.Second),
 		server.WithWriteTimeout(time.Duration(cfg.WriteTimeoutSeconds)*time.Second),
 	)
+	allowedOrigins := cfg.CORS.AllowedOriginsOrDefault()
 	// 注册全局中间件
-	h.Use(middleware.RequestID(), middleware.Recovery(), middleware.UserContext())
+	h.Use(middleware.RequestID(), middleware.Recovery(), middleware.CORS(allowedOrigins), middleware.UserContext())
 
 	apiroutes.RegisterRoutes(h, deps)
 

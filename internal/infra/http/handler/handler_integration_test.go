@@ -274,6 +274,70 @@ func TestRouteValidationAndHealthIntegration(t *testing.T) {
 	assertErrorResponse(t, invalidAssetProjectID)
 }
 
+func TestCORSMiddlewareIntegration(t *testing.T) {
+	h := newTestServer()
+	allowedOrigin := "http://localhost:5173"
+	deniedOrigin := "http://example.com"
+
+	t.Run("preflight with allowed origin returns 204 and cors headers", func(t *testing.T) {
+		recorder := performRequestWithHeaders(
+			h,
+			consts.MethodOptions,
+			"/api/v1/projects",
+			"",
+			ut.Header{Key: "Origin", Value: allowedOrigin},
+		)
+
+		assertStatusCode(t, recorder.Code, consts.StatusNoContent)
+		if got := string(recorder.Header().Peek("Access-Control-Allow-Origin")); got != allowedOrigin {
+			t.Fatalf("allow origin header = %q, want %q", got, allowedOrigin)
+		}
+		if got := string(recorder.Header().Peek("Access-Control-Allow-Methods")); got != "GET,POST,PUT,DELETE,OPTIONS" {
+			t.Fatalf("allow methods header = %q, want %q", got, "GET,POST,PUT,DELETE,OPTIONS")
+		}
+		if got := string(recorder.Header().Peek("Access-Control-Allow-Headers")); got != "Content-Type,X-User-ID,X-Request-ID" {
+			t.Fatalf("allow headers header = %q, want %q", got, "Content-Type,X-User-ID,X-Request-ID")
+		}
+		if got := string(recorder.Header().Peek("Access-Control-Expose-Headers")); got != "X-Request-ID" {
+			t.Fatalf("expose headers header = %q, want %q", got, "X-Request-ID")
+		}
+		if got := string(recorder.Header().Peek("Vary")); got != "Origin" {
+			t.Fatalf("vary header = %q, want %q", got, "Origin")
+		}
+	})
+
+	t.Run("preflight with denied origin returns 403", func(t *testing.T) {
+		recorder := performRequestWithHeaders(
+			h,
+			consts.MethodOptions,
+			"/api/v1/projects",
+			"",
+			ut.Header{Key: "Origin", Value: deniedOrigin},
+		)
+
+		assertStatusCode(t, recorder.Code, consts.StatusForbidden)
+		assertErrorMessage(t, recorder, "cors origin not allowed")
+	})
+
+	t.Run("normal request with allowed origin includes expose headers", func(t *testing.T) {
+		recorder := performRequestWithHeaders(
+			h,
+			consts.MethodGet,
+			"/healthz",
+			"",
+			ut.Header{Key: "Origin", Value: allowedOrigin},
+		)
+
+		assertStatusCode(t, recorder.Code, consts.StatusOK)
+		if got := string(recorder.Header().Peek("Access-Control-Allow-Origin")); got != allowedOrigin {
+			t.Fatalf("allow origin header = %q, want %q", got, allowedOrigin)
+		}
+		if got := string(recorder.Header().Peek("Access-Control-Expose-Headers")); got != "X-Request-ID" {
+			t.Fatalf("expose headers header = %q, want %q", got, "X-Request-ID")
+		}
+	})
+}
+
 func TestAssetIDValidationIntegration(t *testing.T) {
 	h := newTestServer()
 
@@ -1078,6 +1142,9 @@ func newTestServerWithAllUseCases(projectUseCase projectservice.UseCase, assetUs
 		Port:                18080,
 		ReadTimeoutSeconds:  1,
 		WriteTimeoutSeconds: 1,
+		CORS: config.CORSConfig{
+			AllowedOrigins: []string{"http://localhost:5173", "http://127.0.0.1:5173"},
+		},
 	}
 
 	h := server.Default(
@@ -1085,7 +1152,12 @@ func newTestServerWithAllUseCases(projectUseCase projectservice.UseCase, assetUs
 		server.WithReadTimeout(time.Duration(testConfig.ReadTimeoutSeconds)*time.Second),
 		server.WithWriteTimeout(time.Duration(testConfig.WriteTimeoutSeconds)*time.Second),
 	)
-	h.Use(middleware.RequestID(), middleware.Recovery(), middleware.UserContext())
+	h.Use(
+		middleware.RequestID(),
+		middleware.Recovery(),
+		middleware.CORS(testConfig.CORS.AllowedOriginsOrDefault()),
+		middleware.UserContext(),
+	)
 	apiroutes.RegisterRoutes(h, apiroutes.Dependencies{
 		Projects:      projectUseCase,
 		Assets:        assetUseCase,

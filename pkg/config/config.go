@@ -25,10 +25,21 @@ type AppConfig struct {
 
 // ServerConfig holds HTTP server related runtime options.
 type ServerConfig struct {
-	Host                string `yaml:"host"`
-	Port                int    `yaml:"port"`
-	ReadTimeoutSeconds  int    `yaml:"read_timeout_seconds"`
-	WriteTimeoutSeconds int    `yaml:"write_timeout_seconds"`
+	Host                string     `yaml:"host"`
+	Port                int        `yaml:"port"`
+	ReadTimeoutSeconds  int        `yaml:"read_timeout_seconds"`
+	WriteTimeoutSeconds int        `yaml:"write_timeout_seconds"`
+	CORS                CORSConfig `yaml:"cors"`
+}
+
+var defaultCORSAllowedOrigins = []string{
+	"http://localhost:5173",
+	"http://127.0.0.1:5173",
+}
+
+// CORSConfig holds Cross-Origin Resource Sharing options.
+type CORSConfig struct {
+	AllowedOrigins []string `yaml:"allowed_origins"`
 }
 
 // StorageConfig holds repository provider wiring options.
@@ -139,12 +150,55 @@ func (c ServerConfig) Validate() error {
 	if c.WriteTimeoutSeconds <= 0 {
 		return fmt.Errorf("write_timeout_seconds must be greater than 0")
 	}
+	if err := c.CORS.Validate(); err != nil {
+		return fmt.Errorf("invalid cors config: %w", err)
+	}
 	return nil
 }
 
 // Address returns server listen address.
 func (c ServerConfig) Address() string {
 	return fmt.Sprintf("%s:%d", c.Host, c.Port)
+}
+
+// AllowedOriginsOrDefault returns configured allowed origins.
+// When no origin is configured, local frontend origins are used by default.
+func (c CORSConfig) AllowedOriginsOrDefault() []string {
+	normalized := normalizeOrigins(c.AllowedOrigins)
+	if len(normalized) > 0 {
+		return normalized
+	}
+	return append([]string(nil), defaultCORSAllowedOrigins...)
+}
+
+// Validate validates CORS configuration.
+func (c CORSConfig) Validate() error {
+	for _, origin := range c.AllowedOrigins {
+		if strings.TrimSpace(origin) == "" {
+			return fmt.Errorf("allowed_origins must not contain empty values")
+		}
+	}
+	return nil
+}
+
+func normalizeOrigins(origins []string) []string {
+	if len(origins) == 0 {
+		return nil
+	}
+	seen := make(map[string]struct{}, len(origins))
+	result := make([]string, 0, len(origins))
+	for _, origin := range origins {
+		trimmed := strings.TrimSpace(origin)
+		if trimmed == "" {
+			continue
+		}
+		if _, exists := seen[trimmed]; exists {
+			continue
+		}
+		seen[trimmed] = struct{}{}
+		result = append(result, trimmed)
+	}
+	return result
 }
 
 // Validate validates storage configuration.

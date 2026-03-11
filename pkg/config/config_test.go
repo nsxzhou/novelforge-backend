@@ -25,6 +25,9 @@ func validAppConfig() AppConfig {
 			Port:                8080,
 			ReadTimeoutSeconds:  15,
 			WriteTimeoutSeconds: 15,
+			CORS: CORSConfig{
+				AllowedOrigins: []string{"http://127.0.0.1:5173"},
+			},
 		},
 		Storage: StorageConfig{
 			Provider: StorageProviderMemory,
@@ -37,6 +40,88 @@ func validAppConfig() AppConfig {
 			TimeoutSeconds: 60,
 			Prompts:        validPromptConfig(),
 		},
+	}
+}
+
+func TestCORSConfigAllowedOriginsOrDefault(t *testing.T) {
+	t.Run("returns configured origins with normalization", func(t *testing.T) {
+		cfg := CORSConfig{
+			AllowedOrigins: []string{
+				" http://localhost:5173 ",
+				"http://localhost:5173",
+				"http://127.0.0.1:5173",
+			},
+		}
+
+		got := cfg.AllowedOriginsOrDefault()
+		want := []string{"http://localhost:5173", "http://127.0.0.1:5173"}
+		if len(got) != len(want) {
+			t.Fatalf("len(AllowedOriginsOrDefault()) = %d, want %d", len(got), len(want))
+		}
+		for i := range want {
+			if got[i] != want[i] {
+				t.Fatalf("AllowedOriginsOrDefault()[%d] = %q, want %q", i, got[i], want[i])
+			}
+		}
+	})
+
+	t.Run("falls back to default origins when unset", func(t *testing.T) {
+		cfg := CORSConfig{}
+
+		got := cfg.AllowedOriginsOrDefault()
+		want := []string{"http://localhost:5173", "http://127.0.0.1:5173"}
+		if len(got) != len(want) {
+			t.Fatalf("len(AllowedOriginsOrDefault()) = %d, want %d", len(got), len(want))
+		}
+		for i := range want {
+			if got[i] != want[i] {
+				t.Fatalf("AllowedOriginsOrDefault()[%d] = %q, want %q", i, got[i], want[i])
+			}
+		}
+	})
+}
+
+func TestCORSConfigValidate(t *testing.T) {
+	tests := []struct {
+		name    string
+		cfg     CORSConfig
+		wantErr string
+	}{
+		{
+			name: "valid empty config",
+			cfg:  CORSConfig{},
+		},
+		{
+			name: "valid origins",
+			cfg: CORSConfig{
+				AllowedOrigins: []string{"http://localhost:5173", "http://127.0.0.1:5173"},
+			},
+		},
+		{
+			name: "contains empty origin",
+			cfg: CORSConfig{
+				AllowedOrigins: []string{"http://localhost:5173", "   "},
+			},
+			wantErr: "allowed_origins must not contain empty values",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := tt.cfg.Validate()
+			if tt.wantErr == "" {
+				if err != nil {
+					t.Fatalf("Validate() error = %v", err)
+				}
+				return
+			}
+			if err == nil {
+				t.Fatalf("Validate() error = nil, want %q", tt.wantErr)
+			}
+			if !strings.Contains(err.Error(), tt.wantErr) {
+				t.Fatalf("Validate() error = %v, want substring %q", err, tt.wantErr)
+			}
+		})
 	}
 }
 

@@ -8,7 +8,7 @@
 
 - Hertz HTTP 服务启动与生命周期入口
 - 运行时 YAML 配置加载与快速失败校验（`AppConfig`、`ServerConfig`、`LLMConfig`、`StorageConfig`）
-- Request ID 中间件与 panic 恢复中间件
+- Request ID、panic 恢复、CORS 白名单中间件
 - 健康检查接口：
   - `GET /healthz`
   - `GET /readyz`
@@ -124,6 +124,16 @@ V1 全部 6 个领域聚合已落地，每个聚合包含实体定义（`model.g
 默认示例配置已指向 PostgreSQL，并启用 OpenAI 兼容 LLM provider：
 
 ```yaml
+server:
+  host: "0.0.0.0"
+  port: 8080
+  read_timeout_seconds: 15
+  write_timeout_seconds: 15
+  cors:
+    allowed_origins:
+      - "http://localhost:5173"
+      - "http://127.0.0.1:5173"
+
 storage:
   provider: "postgres"
   postgres:
@@ -148,6 +158,8 @@ llm:
 ```
 
 说明：`provider_env/model_env/base_url_env/api_key_env` 存的是“环境变量名”，运行时会从这些变量读取真实值。
+
+`server.cors.allowed_origins` 用于配置允许的跨域来源列表。预检请求（`OPTIONS`）仅对白名单来源放行；如果配置为空，默认放行本地开发来源 `http://localhost:5173` 和 `http://127.0.0.1:5173`。
 
 Prompt 模板文件位于：
 
