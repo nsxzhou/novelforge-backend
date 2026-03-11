@@ -36,6 +36,7 @@
   - `POST /api/v1/conversations/:conversationID/confirm`
 - 已接入 OpenAI 兼容 LLM 客户端装配、Prompt 模板注册表，以及 Project / Asset 对话驱动微调链路（建议生成 -> 显式确认 -> 写回）和章节生成主链路（生成 / 续写 / 局部重写）
 - Prompt 能力映射已类型化（`PromptCapability`），业务侧不再依赖散落的字符串键
+- 前端子仓库已完成 V1 对接页面，覆盖项目入口、设定工坊、对话微调、章节生成与当前稿确认流程；联调验收条目维护在 `../frontend/docs/前端开发优先级-V1.md`
 
 ### 领域模型层 (`internal/domain`)
 
