@@ -1,0 +1,27 @@
+server:
+  host: "0.0.0.0"
+  port: 8080
+  read_timeout_seconds: 15
+  write_timeout_seconds: 15
+
+storage:
+  provider: "postgres"
+  postgres:
+    url_env: "NOVELFORGE_DATABASE_URL"
+    max_open_conns: 10
+    max_idle_conns: 5
+    conn_max_lifetime_seconds: 300
+
+llm:
+  provider_env: "NOVELFORGE_LLM_PROVIDER"
+  model_env: "NOVELFORGE_LLM_MODEL"
+  base_url_env: "NOVELFORGE_LLM_BASE_URL"
+  api_key_env: "NOVELFORGE_LLM_API_KEY"
+  timeout_seconds: 60
+  prompts:
+    asset_generation: "asset_generation.yaml"
+    chapter_generation: "chapter_generation.yaml"
+    chapter_continuation: "chapter_continuation.yaml"
+    chapter_rewrite: "chapter_rewrite.yaml"
+    project_refinement: "project_refinement.yaml"
+    asset_refinement: "asset_refinement.yaml"
