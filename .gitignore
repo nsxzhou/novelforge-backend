@@ -1,2 +1,5 @@
 .ace-tool/
 .omc
+.env
+.env.*
+!.env.example

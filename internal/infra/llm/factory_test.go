@@ -30,9 +30,9 @@ func (s *stubToolCallingChatModel) WithTools(_ []*schema.ToolInfo) (model.ToolCa
 
 func validLLMConfig(apiKeyEnv string) config.LLMConfig {
 	return config.LLMConfig{
-		Provider:       config.LLMProviderOpenAICompatible,
-		Model:          "gpt-4o-mini",
-		BaseURL:        "https://api.openai.com/v1",
+		ProviderEnv:    "NOVELFORGE_LLM_PROVIDER",
+		ModelEnv:       "NOVELFORGE_LLM_MODEL",
+		BaseURLEnv:     "NOVELFORGE_LLM_BASE_URL",
 		APIKeyEnv:      apiKeyEnv,
 		TimeoutSeconds: 60,
 		Prompts: config.PromptConfig{
@@ -47,8 +47,16 @@ func validLLMConfig(apiKeyEnv string) config.LLMConfig {
 }
 
 func TestNewClientOpenAICompatibleReturnsChatModel(t *testing.T) {
-	const apiKeyEnv = "NOVELFORGE_LLM_API_KEY_FACTORY_SUCCESS_TEST"
+	const (
+		providerEnv = "NOVELFORGE_LLM_PROVIDER_FACTORY_SUCCESS_TEST"
+		modelEnv    = "NOVELFORGE_LLM_MODEL_FACTORY_SUCCESS_TEST"
+		baseURLEnv  = "NOVELFORGE_LLM_BASE_URL_FACTORY_SUCCESS_TEST"
+		apiKeyEnv   = "NOVELFORGE_LLM_API_KEY_FACTORY_SUCCESS_TEST"
+	)
 
+	t.Setenv(providerEnv, config.LLMProviderOpenAICompatible)
+	t.Setenv(modelEnv, "gpt-4o-mini")
+	t.Setenv(baseURLEnv, "https://api.openai.com/v1")
 	t.Setenv(apiKeyEnv, "test-key")
 
 	var gotCfg *openaimodel.ChatModelConfig
@@ -59,7 +67,11 @@ func TestNewClientOpenAICompatibleReturnsChatModel(t *testing.T) {
 	}
 	defer func() { newOpenAIChatModel = previousFactory }()
 
-	client, err := NewClient(validLLMConfig(apiKeyEnv))
+	cfg := validLLMConfig(apiKeyEnv)
+	cfg.ProviderEnv = providerEnv
+	cfg.ModelEnv = modelEnv
+	cfg.BaseURLEnv = baseURLEnv
+	client, err := NewClient(cfg)
 	if err != nil {
 		t.Fatalf("NewClient() error = %v", err)
 	}
@@ -93,8 +105,16 @@ func TestNewClientOpenAICompatibleReturnsChatModel(t *testing.T) {
 }
 
 func TestNewClientOpenAICompatibleFactoryError(t *testing.T) {
-	const apiKeyEnv = "NOVELFORGE_LLM_API_KEY_FACTORY_ERROR_TEST"
+	const (
+		providerEnv = "NOVELFORGE_LLM_PROVIDER_FACTORY_ERROR_TEST"
+		modelEnv    = "NOVELFORGE_LLM_MODEL_FACTORY_ERROR_TEST"
+		baseURLEnv  = "NOVELFORGE_LLM_BASE_URL_FACTORY_ERROR_TEST"
+		apiKeyEnv   = "NOVELFORGE_LLM_API_KEY_FACTORY_ERROR_TEST"
+	)
 
+	t.Setenv(providerEnv, config.LLMProviderOpenAICompatible)
+	t.Setenv(modelEnv, "gpt-4o-mini")
+	t.Setenv(baseURLEnv, "https://api.openai.com/v1")
 	t.Setenv(apiKeyEnv, "test-key")
 
 	previousFactory := newOpenAIChatModel
@@ -103,16 +123,33 @@ func TestNewClientOpenAICompatibleFactoryError(t *testing.T) {
 	}
 	defer func() { newOpenAIChatModel = previousFactory }()
 
-	_, err := NewClient(validLLMConfig(apiKeyEnv))
+	cfg := validLLMConfig(apiKeyEnv)
+	cfg.ProviderEnv = providerEnv
+	cfg.ModelEnv = modelEnv
+	cfg.BaseURLEnv = baseURLEnv
+	_, err := NewClient(cfg)
 	if err == nil {
 		t.Fatal("NewClient() error = nil, want constructor error")
 	}
 }
 
 func TestNewClientMissingAPIKeyEnv(t *testing.T) {
-	const apiKeyEnv = "NOVELFORGE_LLM_API_KEY_FACTORY_MISSING_TEST"
+	const (
+		providerEnv = "NOVELFORGE_LLM_PROVIDER_FACTORY_MISSING_API_KEY_TEST"
+		modelEnv    = "NOVELFORGE_LLM_MODEL_FACTORY_MISSING_API_KEY_TEST"
+		baseURLEnv  = "NOVELFORGE_LLM_BASE_URL_FACTORY_MISSING_API_KEY_TEST"
+		apiKeyEnv   = "NOVELFORGE_LLM_API_KEY_FACTORY_MISSING_TEST"
+	)
 
-	_, err := NewClient(validLLMConfig(apiKeyEnv))
+	t.Setenv(providerEnv, config.LLMProviderOpenAICompatible)
+	t.Setenv(modelEnv, "gpt-4o-mini")
+	t.Setenv(baseURLEnv, "https://api.openai.com/v1")
+
+	cfg := validLLMConfig(apiKeyEnv)
+	cfg.ProviderEnv = providerEnv
+	cfg.ModelEnv = modelEnv
+	cfg.BaseURLEnv = baseURLEnv
+	_, err := NewClient(cfg)
 	if err == nil {
 		t.Fatal("NewClient() error = nil, want missing env error")
 	}
@@ -122,15 +159,52 @@ func TestNewClientMissingAPIKeyEnv(t *testing.T) {
 }
 
 func TestNewClientEmptyAPIKeyEnv(t *testing.T) {
-	const apiKeyEnv = "NOVELFORGE_LLM_API_KEY_FACTORY_EMPTY_TEST"
+	const (
+		providerEnv = "NOVELFORGE_LLM_PROVIDER_FACTORY_EMPTY_API_KEY_TEST"
+		modelEnv    = "NOVELFORGE_LLM_MODEL_FACTORY_EMPTY_API_KEY_TEST"
+		baseURLEnv  = "NOVELFORGE_LLM_BASE_URL_FACTORY_EMPTY_API_KEY_TEST"
+		apiKeyEnv   = "NOVELFORGE_LLM_API_KEY_FACTORY_EMPTY_TEST"
+	)
 
+	t.Setenv(providerEnv, config.LLMProviderOpenAICompatible)
+	t.Setenv(modelEnv, "gpt-4o-mini")
+	t.Setenv(baseURLEnv, "https://api.openai.com/v1")
 	t.Setenv(apiKeyEnv, "   ")
 
-	_, err := NewClient(validLLMConfig(apiKeyEnv))
+	cfg := validLLMConfig(apiKeyEnv)
+	cfg.ProviderEnv = providerEnv
+	cfg.ModelEnv = modelEnv
+	cfg.BaseURLEnv = baseURLEnv
+	_, err := NewClient(cfg)
 	if err == nil {
 		t.Fatal("NewClient() error = nil, want empty env error")
 	}
 	if !strings.Contains(err.Error(), "required environment variable \""+apiKeyEnv+"\" is not set or empty") {
 		t.Fatalf("NewClient() error = %v, want empty env error", err)
+	}
+}
+
+func TestNewClientMissingProviderEnv(t *testing.T) {
+	const (
+		providerEnv = "NOVELFORGE_LLM_PROVIDER_FACTORY_MISSING_PROVIDER_TEST"
+		modelEnv    = "NOVELFORGE_LLM_MODEL_FACTORY_MISSING_PROVIDER_TEST"
+		baseURLEnv  = "NOVELFORGE_LLM_BASE_URL_FACTORY_MISSING_PROVIDER_TEST"
+		apiKeyEnv   = "NOVELFORGE_LLM_API_KEY_FACTORY_MISSING_PROVIDER_TEST"
+	)
+
+	t.Setenv(modelEnv, "gpt-4o-mini")
+	t.Setenv(baseURLEnv, "https://api.openai.com/v1")
+	t.Setenv(apiKeyEnv, "test-key")
+
+	cfg := validLLMConfig(apiKeyEnv)
+	cfg.ProviderEnv = providerEnv
+	cfg.ModelEnv = modelEnv
+	cfg.BaseURLEnv = baseURLEnv
+	_, err := NewClient(cfg)
+	if err == nil {
+		t.Fatal("NewClient() error = nil, want missing provider env error")
+	}
+	if !strings.Contains(err.Error(), "required environment variable \""+providerEnv+"\" is not set or empty") {
+		t.Fatalf("NewClient() error = %v, want missing provider env error", err)
 	}
 }

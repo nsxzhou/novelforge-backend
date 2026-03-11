@@ -103,24 +103,21 @@ V1 全部 6 个领域聚合已落地，每个聚合包含实体定义（`model.g
    docker compose up -d postgres
    ```
 
-3. 设置环境变量：
+3. 准备环境变量文件：
 
    ```bash
-   export NOVELFORGE_DATABASE_URL="postgres://novelforge:novelforge@127.0.0.1:5432/novelforge?sslmode=disable"
-   export NOVELFORGE_LLM_API_KEY="your-key"
+   cp .env.example .env
    ```
+
+   然后按需修改 `.env` 中的 `NOVELFORGE_*` 配置（尤其是 `NOVELFORGE_LLM_API_KEY`）。
 
 4. 启动服务（`provider=postgres` 时会自动执行 migration）：
 
    ```bash
-   go run ./cmd/server -config configs/config.yaml
+   ./scripts/run-local.sh
    ```
 
-也可以使用辅助脚本启动：
-
-```bash
-./scripts/run-local.sh
-```
+   `./scripts/run-local.sh` 会在检测到 `backend/.env` 时自动加载该文件。
 
 ## 配置说明
 
@@ -136,9 +133,9 @@ storage:
     conn_max_lifetime_seconds: 300
 
 llm:
-  provider: "openai_compatible"
-  model: "gpt-4o-mini"
-  base_url: "https://api.openai.com/v1"
+  provider_env: "NOVELFORGE_LLM_PROVIDER"
+  model_env: "NOVELFORGE_LLM_MODEL"
+  base_url_env: "NOVELFORGE_LLM_BASE_URL"
   api_key_env: "NOVELFORGE_LLM_API_KEY"
   timeout_seconds: 60
   prompts:
@@ -149,6 +146,8 @@ llm:
     project_refinement: "project_refinement.yaml"
     asset_refinement: "asset_refinement.yaml"
 ```
+
+说明：`provider_env/model_env/base_url_env/api_key_env` 存的是“环境变量名”，运行时会从这些变量读取真实值。
 
 Prompt 模板文件位于：
 

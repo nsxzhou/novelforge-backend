@@ -81,9 +81,10 @@ type PromptConfig struct {
 
 // LLMConfig holds LLM provider wiring options.
 type LLMConfig struct {
-	Provider       string       `yaml:"provider"`
-	Model          string       `yaml:"model"`
-	BaseURL        string       `yaml:"base_url"`
+	// Env 字段保存的是“环境变量名”，而不是最终 provider/model/base_url 值。
+	ProviderEnv    string       `yaml:"provider_env"`
+	ModelEnv       string       `yaml:"model_env"`
+	BaseURLEnv     string       `yaml:"base_url_env"`
 	APIKeyEnv      string       `yaml:"api_key_env"`
 	TimeoutSeconds int          `yaml:"timeout_seconds"`
 	Prompts        PromptConfig `yaml:"prompts"`
@@ -217,29 +218,23 @@ func (c PromptConfig) FilenameFor(capability PromptCapability) string {
 
 // Validate validates LLM configuration.
 func (c LLMConfig) Validate() error {
-	if c.Provider == "" {
-		return fmt.Errorf("provider must not be empty")
+	if strings.TrimSpace(c.ProviderEnv) == "" {
+		return fmt.Errorf("provider_env must not be empty")
 	}
-
-	switch c.Provider {
-	case LLMProviderOpenAICompatible:
-		if strings.TrimSpace(c.Model) == "" {
-			return fmt.Errorf("model must not be empty")
-		}
-		if strings.TrimSpace(c.BaseURL) == "" {
-			return fmt.Errorf("base_url must not be empty")
-		}
-		if strings.TrimSpace(c.APIKeyEnv) == "" {
-			return fmt.Errorf("api_key_env must not be empty")
-		}
-		if c.TimeoutSeconds <= 0 {
-			return fmt.Errorf("timeout_seconds must be greater than 0")
-		}
-		if err := c.Prompts.Validate(); err != nil {
-			return fmt.Errorf("invalid prompts config: %w", err)
-		}
-		return nil
-	default:
-		return fmt.Errorf("provider must be %q", LLMProviderOpenAICompatible)
+	if strings.TrimSpace(c.ModelEnv) == "" {
+		return fmt.Errorf("model_env must not be empty")
 	}
+	if strings.TrimSpace(c.BaseURLEnv) == "" {
+		return fmt.Errorf("base_url_env must not be empty")
+	}
+	if strings.TrimSpace(c.APIKeyEnv) == "" {
+		return fmt.Errorf("api_key_env must not be empty")
+	}
+	if c.TimeoutSeconds <= 0 {
+		return fmt.Errorf("timeout_seconds must be greater than 0")
+	}
+	if err := c.Prompts.Validate(); err != nil {
+		return fmt.Errorf("invalid prompts config: %w", err)
+	}
+	return nil
 }

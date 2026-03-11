@@ -3,8 +3,6 @@ package app
 import (
 	"context"
 	"fmt"
-	"os"
-	"strings"
 
 	httpinfra "novelforge/backend/internal/infra/http"
 	"novelforge/backend/internal/infra/llm"
@@ -55,12 +53,6 @@ func LoadBootstrap(configPath string) (*Bootstrap, error) {
 	repositories, err := newRepositories(cfg.Storage)
 	if err != nil {
 		return nil, fmt.Errorf("init repositories: %w", err)
-	}
-
-	apiKey, exists := os.LookupEnv(cfg.LLM.APIKeyEnv)
-	if !exists || strings.TrimSpace(apiKey) == "" {
-		_ = closeRepositories(repositories)
-		return nil, fmt.Errorf("required environment variable %q is not set or empty", cfg.LLM.APIKeyEnv)
 	}
 
 	llmClient, err := newLLMClient(cfg.LLM)

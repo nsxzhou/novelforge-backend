@@ -30,9 +30,9 @@ func validAppConfig() AppConfig {
 			Provider: StorageProviderMemory,
 		},
 		LLM: LLMConfig{
-			Provider:       LLMProviderOpenAICompatible,
-			Model:          "gpt-4o-mini",
-			BaseURL:        "https://api.openai.com/v1",
+			ProviderEnv:    "NOVELFORGE_LLM_PROVIDER",
+			ModelEnv:       "NOVELFORGE_LLM_MODEL",
+			BaseURLEnv:     "NOVELFORGE_LLM_BASE_URL",
 			APIKeyEnv:      "NOVELFORGE_LLM_API_KEY",
 			TimeoutSeconds: 60,
 			Prompts:        validPromptConfig(),
@@ -161,21 +161,20 @@ func TestLLMConfigValidate(t *testing.T) {
 		{
 			name: "valid openai compatible",
 			cfg: LLMConfig{
-				Provider:       LLMProviderOpenAICompatible,
-				Model:          "gpt-4o-mini",
-				BaseURL:        "https://api.openai.com/v1",
+				ProviderEnv:    "NOVELFORGE_LLM_PROVIDER",
+				ModelEnv:       "NOVELFORGE_LLM_MODEL",
+				BaseURLEnv:     "NOVELFORGE_LLM_BASE_URL",
 				APIKeyEnv:      "NOVELFORGE_LLM_API_KEY",
 				TimeoutSeconds: 60,
 				Prompts:        validPromptConfig(),
 			},
 		},
-		{name: "empty provider", cfg: LLMConfig{}, wantErr: "provider must not be empty"},
-		{name: "unsupported provider", cfg: LLMConfig{Provider: "placeholder", Model: "gpt-4o-mini", BaseURL: "https://api.openai.com/v1", APIKeyEnv: "NOVELFORGE_LLM_API_KEY", TimeoutSeconds: 60, Prompts: validPromptConfig()}, wantErr: "provider must be \"openai_compatible\""},
-		{name: "missing model", cfg: LLMConfig{Provider: LLMProviderOpenAICompatible, BaseURL: "https://api.openai.com/v1", APIKeyEnv: "NOVELFORGE_LLM_API_KEY", TimeoutSeconds: 60, Prompts: validPromptConfig()}, wantErr: "model must not be empty"},
-		{name: "missing base url", cfg: LLMConfig{Provider: LLMProviderOpenAICompatible, Model: "gpt-4o-mini", APIKeyEnv: "NOVELFORGE_LLM_API_KEY", TimeoutSeconds: 60, Prompts: validPromptConfig()}, wantErr: "base_url must not be empty"},
-		{name: "missing api key env", cfg: LLMConfig{Provider: LLMProviderOpenAICompatible, Model: "gpt-4o-mini", BaseURL: "https://api.openai.com/v1", TimeoutSeconds: 60, Prompts: validPromptConfig()}, wantErr: "api_key_env must not be empty"},
-		{name: "invalid timeout", cfg: LLMConfig{Provider: LLMProviderOpenAICompatible, Model: "gpt-4o-mini", BaseURL: "https://api.openai.com/v1", APIKeyEnv: "NOVELFORGE_LLM_API_KEY", TimeoutSeconds: 0, Prompts: validPromptConfig()}, wantErr: "timeout_seconds must be greater than 0"},
-		{name: "missing prompts", cfg: LLMConfig{Provider: LLMProviderOpenAICompatible, Model: "gpt-4o-mini", BaseURL: "https://api.openai.com/v1", APIKeyEnv: "NOVELFORGE_LLM_API_KEY", TimeoutSeconds: 60}, wantErr: "invalid prompts config: asset_generation must not be empty"},
+		{name: "empty provider env", cfg: LLMConfig{}, wantErr: "provider_env must not be empty"},
+		{name: "missing model env", cfg: LLMConfig{ProviderEnv: "NOVELFORGE_LLM_PROVIDER", BaseURLEnv: "NOVELFORGE_LLM_BASE_URL", APIKeyEnv: "NOVELFORGE_LLM_API_KEY", TimeoutSeconds: 60, Prompts: validPromptConfig()}, wantErr: "model_env must not be empty"},
+		{name: "missing base url env", cfg: LLMConfig{ProviderEnv: "NOVELFORGE_LLM_PROVIDER", ModelEnv: "NOVELFORGE_LLM_MODEL", APIKeyEnv: "NOVELFORGE_LLM_API_KEY", TimeoutSeconds: 60, Prompts: validPromptConfig()}, wantErr: "base_url_env must not be empty"},
+		{name: "missing api key env", cfg: LLMConfig{ProviderEnv: "NOVELFORGE_LLM_PROVIDER", ModelEnv: "NOVELFORGE_LLM_MODEL", BaseURLEnv: "NOVELFORGE_LLM_BASE_URL", TimeoutSeconds: 60, Prompts: validPromptConfig()}, wantErr: "api_key_env must not be empty"},
+		{name: "invalid timeout", cfg: LLMConfig{ProviderEnv: "NOVELFORGE_LLM_PROVIDER", ModelEnv: "NOVELFORGE_LLM_MODEL", BaseURLEnv: "NOVELFORGE_LLM_BASE_URL", APIKeyEnv: "NOVELFORGE_LLM_API_KEY", TimeoutSeconds: 0, Prompts: validPromptConfig()}, wantErr: "timeout_seconds must be greater than 0"},
+		{name: "missing prompts", cfg: LLMConfig{ProviderEnv: "NOVELFORGE_LLM_PROVIDER", ModelEnv: "NOVELFORGE_LLM_MODEL", BaseURLEnv: "NOVELFORGE_LLM_BASE_URL", APIKeyEnv: "NOVELFORGE_LLM_API_KEY", TimeoutSeconds: 60}, wantErr: "invalid prompts config: asset_generation must not be empty"},
 	}
 
 	for _, tt := range tests {
@@ -243,9 +242,9 @@ server:
 storage:
   provider: "memory"
 llm:
-  provider: "openai_compatible"
-  model: "gpt-4o-mini"
-  base_url: "https://api.openai.com/v1"
+  provider_env: "NOVELFORGE_LLM_PROVIDER"
+  model_env: "NOVELFORGE_LLM_MODEL"
+  base_url_env: "NOVELFORGE_LLM_BASE_URL"
   api_key_env: "NOVELFORGE_LLM_API_KEY"
   timeout_seconds: 60
   prompts:
@@ -264,7 +263,7 @@ llm:
 		if err != nil {
 			t.Fatalf("Load() error = %v", err)
 		}
-		if cfg.Server.Host != "127.0.0.1" || cfg.Storage.Provider != StorageProviderMemory || cfg.LLM.Provider != LLMProviderOpenAICompatible {
+		if cfg.Server.Host != "127.0.0.1" || cfg.Storage.Provider != StorageProviderMemory || cfg.LLM.ProviderEnv != "NOVELFORGE_LLM_PROVIDER" {
 			t.Fatalf("Load() cfg = %#v, want parsed app config", cfg)
 		}
 	})
@@ -307,9 +306,9 @@ server:
 storage:
   provider: "memory"
 llm:
-  provider: "openai_compatible"
-  model: "gpt-4o-mini"
-  base_url: "https://api.openai.com/v1"
+  provider_env: "NOVELFORGE_LLM_PROVIDER"
+  model_env: "NOVELFORGE_LLM_MODEL"
+  base_url_env: "NOVELFORGE_LLM_BASE_URL"
   api_key_env: "NOVELFORGE_LLM_API_KEY"
   timeout_seconds: 60
   prompts:

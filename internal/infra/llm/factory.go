@@ -23,7 +23,26 @@ func NewClient(cfg config.LLMConfig) (Client, error) {
 		return nil, fmt.Errorf("validate llm config: %w", err)
 	}
 
-	switch cfg.Provider {
+	// 运行时 provider/model/base_url 统一从环境变量读取，避免把具体值写入配置文件。
+	provider, exists := os.LookupEnv(cfg.ProviderEnv)
+	if !exists || strings.TrimSpace(provider) == "" {
+		return nil, fmt.Errorf("required environment variable %q is not set or empty", cfg.ProviderEnv)
+	}
+	provider = strings.TrimSpace(provider)
+
+	modelName, exists := os.LookupEnv(cfg.ModelEnv)
+	if !exists || strings.TrimSpace(modelName) == "" {
+		return nil, fmt.Errorf("required environment variable %q is not set or empty", cfg.ModelEnv)
+	}
+	modelName = strings.TrimSpace(modelName)
+
+	baseURL, exists := os.LookupEnv(cfg.BaseURLEnv)
+	if !exists || strings.TrimSpace(baseURL) == "" {
+		return nil, fmt.Errorf("required environment variable %q is not set or empty", cfg.BaseURLEnv)
+	}
+	baseURL = strings.TrimSpace(baseURL)
+
+	switch provider {
 	case config.LLMProviderOpenAICompatible:
 		apiKey, exists := os.LookupEnv(cfg.APIKeyEnv)
 		if !exists || strings.TrimSpace(apiKey) == "" {
@@ -32,8 +51,8 @@ func NewClient(cfg config.LLMConfig) (Client, error) {
 
 		chatModel, err := newOpenAIChatModel(context.Background(), &openaimodel.ChatModelConfig{
 			APIKey:  apiKey,
-			Model:   cfg.Model,
-			BaseURL: cfg.BaseURL,
+			Model:   modelName,
+			BaseURL: baseURL,
 			Timeout: time.Duration(cfg.TimeoutSeconds) * time.Second,
 		})
 		if err != nil {
@@ -41,11 +60,11 @@ func NewClient(cfg config.LLMConfig) (Client, error) {
 		}
 
 		return &openAICompatibleClient{
-			provider: cfg.Provider,
-			model:    cfg.Model,
+			provider: provider,
+			model:    modelName,
 			chat:     chatModel,
 		}, nil
 	default:
-		return nil, fmt.Errorf("unsupported llm provider %q", cfg.Provider)
+		return nil, fmt.Errorf("unsupported llm provider %q", provider)
 	}
 }
