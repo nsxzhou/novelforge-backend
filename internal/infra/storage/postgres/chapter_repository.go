@@ -27,7 +27,8 @@ func (r *ChapterRepository) Create(ctx context.Context, entity *chapterdomain.Ch
 		return err
 	}
 
-	_, err := r.db.ExecContext(ctx, `
+	executor := executorFromContext(ctx, r.db)
+	_, err := executor.ExecContext(ctx, `
 		INSERT INTO chapters (
 			id, project_id, title, ordinal, status, content,
 			current_draft_id, current_draft_confirmed_at, current_draft_confirmed_by,
@@ -51,10 +52,11 @@ func (r *ChapterRepository) Create(ctx context.Context, entity *chapterdomain.Ch
 
 func (r *ChapterRepository) GetByID(ctx context.Context, id string) (*chapterdomain.Chapter, error) {
 	entity := &chapterdomain.Chapter{}
+	executor := executorFromContext(ctx, r.db)
 	var currentDraftID sql.NullString
 	var confirmedAt sql.NullTime
 	var confirmedBy sql.NullString
-	if err := r.db.QueryRowContext(ctx, `
+	if err := executor.QueryRowContext(ctx, `
 		SELECT id, project_id, title, ordinal, status, content,
 			current_draft_id, current_draft_confirmed_at, current_draft_confirmed_by,
 			created_at, updated_at
@@ -100,7 +102,8 @@ func (r *ChapterRepository) ListByProject(ctx context.Context, params chapterdom
 	args := []any{params.ProjectID}
 	query, args = appendPagination(query, params.Limit, params.Offset, args)
 
-	rows, err := r.db.QueryContext(ctx, query, args...)
+	executor := executorFromContext(ctx, r.db)
+	rows, err := executor.QueryContext(ctx, query, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -153,7 +156,8 @@ func (r *ChapterRepository) Update(ctx context.Context, entity *chapterdomain.Ch
 		return err
 	}
 
-	result, err := r.db.ExecContext(ctx, `
+	executor := executorFromContext(ctx, r.db)
+	result, err := executor.ExecContext(ctx, `
 		UPDATE chapters
 		SET project_id = $2, title = $3, ordinal = $4, status = $5, content = $6,
 			current_draft_id = $7, current_draft_confirmed_at = $8, current_draft_confirmed_by = $9,
@@ -188,7 +192,8 @@ func (r *ChapterRepository) UpdateIfUnchanged(ctx context.Context, entity *chapt
 		return false, fmt.Errorf("expected_updated_at must not be zero")
 	}
 
-	result, err := r.db.ExecContext(ctx, `
+	executor := executorFromContext(ctx, r.db)
+	result, err := executor.ExecContext(ctx, `
 		UPDATE chapters
 		SET project_id = $2, title = $3, ordinal = $4, status = $5, content = $6,
 			current_draft_id = $7, current_draft_confirmed_at = $8, current_draft_confirmed_by = $9,

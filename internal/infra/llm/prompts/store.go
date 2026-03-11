@@ -51,7 +51,7 @@ func (t *Template) Render(data any) (string, string, error) {
 
 // Store keeps prompt templates keyed by generation kind.
 type Store struct {
-	templates map[string]*Template
+	templates map[config.PromptCapability]*Template
 }
 
 // LoadStore loads and validates configured prompt templates.
@@ -60,52 +60,53 @@ func LoadStore(cfg config.PromptConfig) (*Store, error) {
 		return nil, fmt.Errorf("validate prompts config: %w", err)
 	}
 
-	templates := make(map[string]*Template, len(cfg))
-	for kind, filename := range cfg {
-		tmpl, err := loadTemplate(kind, filename)
+	capabilities := config.AllPromptCapabilities()
+	templates := make(map[config.PromptCapability]*Template, len(capabilities))
+	for _, capability := range capabilities {
+		tmpl, err := loadTemplate(capability, cfg.FilenameFor(capability))
 		if err != nil {
 			return nil, err
 		}
-		templates[kind] = tmpl
+		templates[capability] = tmpl
 	}
 
 	return &Store{templates: templates}, nil
 }
 
 // Get returns the template configured for a generation kind.
-func (s *Store) Get(kind string) (*Template, bool) {
+func (s *Store) Get(capability config.PromptCapability) (*Template, bool) {
 	if s == nil {
 		return nil, false
 	}
-	value, ok := s.templates[kind]
+	value, ok := s.templates[capability]
 	return value, ok
 }
 
-func loadTemplate(kind, filename string) (*Template, error) {
+func loadTemplate(capability config.PromptCapability, filename string) (*Template, error) {
 	content, err := fs.ReadFile(templateFS, filename)
 	if err != nil {
-		return nil, fmt.Errorf("read prompt template %q for %q: %w", filename, kind, err)
+		return nil, fmt.Errorf("read prompt template %q for %q: %w", filename, capability, err)
 	}
 
 	var raw fileTemplate
 	if err := yaml.Unmarshal(content, &raw); err != nil {
-		return nil, fmt.Errorf("unmarshal prompt template %q for %q: %w", filename, kind, err)
+		return nil, fmt.Errorf("unmarshal prompt template %q for %q: %w", filename, capability, err)
 	}
 
 	if strings.TrimSpace(raw.System) == "" {
-		return nil, fmt.Errorf("prompt template %q for %q field %q must not be empty", filename, kind, "system")
+		return nil, fmt.Errorf("prompt template %q for %q field %q must not be empty", filename, capability, "system")
 	}
 	if strings.TrimSpace(raw.User) == "" {
-		return nil, fmt.Errorf("prompt template %q for %q field %q must not be empty", filename, kind, "user")
+		return nil, fmt.Errorf("prompt template %q for %q field %q must not be empty", filename, capability, "user")
 	}
 
-	systemTemplate, err := texttemplate.New(kind + ":system").Parse(raw.System)
+	systemTemplate, err := texttemplate.New(string(capability) + ":system").Parse(raw.System)
 	if err != nil {
-		return nil, fmt.Errorf("parse prompt template %q for %q system: %w", filename, kind, err)
+		return nil, fmt.Errorf("parse prompt template %q for %q system: %w", filename, capability, err)
 	}
-	userTemplate, err := texttemplate.New(kind + ":user").Parse(raw.User)
+	userTemplate, err := texttemplate.New(string(capability) + ":user").Parse(raw.User)
 	if err != nil {
-		return nil, fmt.Errorf("parse prompt template %q for %q user: %w", filename, kind, err)
+		return nil, fmt.Errorf("parse prompt template %q for %q user: %w", filename, capability, err)
 	}
 
 	return &Template{

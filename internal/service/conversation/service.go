@@ -11,6 +11,11 @@ import (
 	metricservice "novelforge/backend/internal/service/metric"
 )
 
+// TxRunner 抽象对话确认流程所需的事务边界。
+type TxRunner interface {
+	InTx(ctx context.Context, fn func(context.Context) error) error
+}
+
 // Dependencies 声明对话(conversation)细化用例所需的依赖项。
 type Dependencies struct {
 	Conversations conversationdomain.ConversationRepository
@@ -19,6 +24,7 @@ type Dependencies struct {
 	LLMClient     llm.Client
 	PromptStore   *prompts.Store
 	Metrics       metricservice.UseCase
+	TxRunner      TxRunner
 }
 
 // StartParams 定义发起细化对话所需参数。

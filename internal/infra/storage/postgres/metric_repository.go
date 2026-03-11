@@ -26,6 +26,7 @@ func (r *MetricEventRepository) Append(ctx context.Context, entity *metricdomain
 		return err
 	}
 
+	executor := executorFromContext(ctx, r.db)
 	labels, err := marshalJSON(entity.Labels)
 	if err != nil {
 		return err
@@ -34,7 +35,7 @@ func (r *MetricEventRepository) Append(ctx context.Context, entity *metricdomain
 	if err != nil {
 		return err
 	}
-	_, err = r.db.ExecContext(ctx, `
+	_, err = executor.ExecContext(ctx, `
 		INSERT INTO metric_events (id, event_name, project_id, chapter_id, labels, stats, occurred_at)
 		VALUES ($1, $2, $3, $4, $5::jsonb, $6::jsonb, $7)
 	`, entity.ID, entity.EventName, entity.ProjectID, toNullString(entity.ChapterID), labels, stats, entity.OccurredAt)
@@ -55,7 +56,8 @@ func (r *MetricEventRepository) ListByProject(ctx context.Context, params metric
 	query += ` ORDER BY occurred_at ASC, id ASC`
 	query, args = appendPagination(query, params.Limit, params.Offset, args)
 
-	rows, err := r.db.QueryContext(ctx, query, args...)
+	executor := executorFromContext(ctx, r.db)
+	rows, err := executor.QueryContext(ctx, query, args...)
 	if err != nil {
 		return nil, err
 	}

@@ -16,6 +16,11 @@ type ReadinessChecker interface {
 	CheckReadiness(ctx context.Context) error
 }
 
+// TxRunner executes function closures within an optional storage transaction.
+type TxRunner interface {
+	InTx(ctx context.Context, fn func(context.Context) error) error
+}
+
 // Repositories 将所有领域存储库(repository)契约组合在一起，用于运行时装配(runtime wiring)。
 type Repositories struct {
 	Projects          project.ProjectRepository
@@ -24,6 +29,7 @@ type Repositories struct {
 	Conversations     conversation.ConversationRepository
 	GenerationRecords generation.GenerationRecordRepository
 	MetricEvents      metric.MetricEventRepository
+	TxRunner          TxRunner
 
 	readiness ReadinessChecker
 	closeFunc func() error

@@ -26,7 +26,8 @@ func (r *GenerationRecordRepository) Create(ctx context.Context, entity *generat
 		return err
 	}
 
-	_, err := r.db.ExecContext(ctx, `
+	executor := executorFromContext(ctx, r.db)
+	_, err := executor.ExecContext(ctx, `
 		INSERT INTO generation_records (
 			id, project_id, chapter_id, conversation_id, kind, status,
 			input_snapshot_ref, output_ref, token_usage, duration_millis,
@@ -52,9 +53,10 @@ func (r *GenerationRecordRepository) Create(ctx context.Context, entity *generat
 
 func (r *GenerationRecordRepository) GetByID(ctx context.Context, id string) (*generationdomain.GenerationRecord, error) {
 	entity := &generationdomain.GenerationRecord{}
+	executor := executorFromContext(ctx, r.db)
 	var chapterID sql.NullString
 	var conversationID sql.NullString
-	if err := r.db.QueryRowContext(ctx, `
+	if err := executor.QueryRowContext(ctx, `
 		SELECT id, project_id, chapter_id, conversation_id, kind, status,
 			input_snapshot_ref, output_ref, token_usage, duration_millis,
 			error_message, created_at, updated_at
@@ -139,7 +141,8 @@ func (r *GenerationRecordRepository) UpdateStatus(ctx context.Context, params ge
 		return fmt.Errorf("updated_at must not be zero")
 	}
 
-	result, err := r.db.ExecContext(ctx, `
+	executor := executorFromContext(ctx, r.db)
+	result, err := executor.ExecContext(ctx, `
 		UPDATE generation_records
 		SET status = $2, output_ref = $3, token_usage = $4, duration_millis = $5,
 			error_message = $6, updated_at = $7
@@ -152,7 +155,8 @@ func (r *GenerationRecordRepository) UpdateStatus(ctx context.Context, params ge
 }
 
 func (r *GenerationRecordRepository) list(ctx context.Context, query string, args ...any) ([]*generationdomain.GenerationRecord, error) {
-	rows, err := r.db.QueryContext(ctx, query, args...)
+	executor := executorFromContext(ctx, r.db)
+	rows, err := executor.QueryContext(ctx, query, args...)
 	if err != nil {
 		return nil, err
 	}

@@ -27,7 +27,8 @@ func (r *AssetRepository) Create(ctx context.Context, entity *assetdomain.Asset)
 		return err
 	}
 
-	_, err := r.db.ExecContext(ctx, `
+	executor := executorFromContext(ctx, r.db)
+	_, err := executor.ExecContext(ctx, `
 		INSERT INTO assets (id, project_id, type, title, content, created_at, updated_at)
 		VALUES ($1, $2, $3, $4, $5, $6, $7)
 	`, entity.ID, entity.ProjectID, entity.Type, entity.Title, entity.Content, entity.CreatedAt, entity.UpdatedAt)
@@ -36,7 +37,8 @@ func (r *AssetRepository) Create(ctx context.Context, entity *assetdomain.Asset)
 
 func (r *AssetRepository) GetByID(ctx context.Context, id string) (*assetdomain.Asset, error) {
 	entity := &assetdomain.Asset{}
-	err := r.db.QueryRowContext(ctx, `
+	executor := executorFromContext(ctx, r.db)
+	err := executor.QueryRowContext(ctx, `
 		SELECT id, project_id, type, title, content, created_at, updated_at
 		FROM assets
 		WHERE id = $1
@@ -87,7 +89,8 @@ func (r *AssetRepository) Update(ctx context.Context, entity *assetdomain.Asset)
 		return err
 	}
 
-	result, err := r.db.ExecContext(ctx, `
+	executor := executorFromContext(ctx, r.db)
+	result, err := executor.ExecContext(ctx, `
 		UPDATE assets
 		SET type = $2, title = $3, content = $4, updated_at = $5
 		WHERE id = $1
@@ -109,7 +112,8 @@ func (r *AssetRepository) UpdateIfUnchanged(ctx context.Context, entity *assetdo
 		return false, fmt.Errorf("expected_updated_at must not be zero")
 	}
 
-	result, err := r.db.ExecContext(ctx, `
+	executor := executorFromContext(ctx, r.db)
+	result, err := executor.ExecContext(ctx, `
 		UPDATE assets
 		SET type = $2, title = $3, content = $4, updated_at = $5
 		WHERE id = $1 AND updated_at = $6
@@ -126,7 +130,8 @@ func (r *AssetRepository) UpdateIfUnchanged(ctx context.Context, entity *assetdo
 }
 
 func (r *AssetRepository) Delete(ctx context.Context, id string) error {
-	result, err := r.db.ExecContext(ctx, `DELETE FROM assets WHERE id = $1`, id)
+	executor := executorFromContext(ctx, r.db)
+	result, err := executor.ExecContext(ctx, `DELETE FROM assets WHERE id = $1`, id)
 	if err != nil {
 		return mapExecError(err)
 	}
@@ -134,7 +139,8 @@ func (r *AssetRepository) Delete(ctx context.Context, id string) error {
 }
 
 func (r *AssetRepository) list(ctx context.Context, query string, args ...any) ([]*assetdomain.Asset, error) {
-	rows, err := r.db.QueryContext(ctx, query, args...)
+	executor := executorFromContext(ctx, r.db)
+	rows, err := executor.QueryContext(ctx, query, args...)
 	if err != nil {
 		return nil, err
 	}

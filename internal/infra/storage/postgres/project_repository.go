@@ -27,7 +27,8 @@ func (r *ProjectRepository) Create(ctx context.Context, entity *projectdomain.Pr
 		return err
 	}
 
-	_, err := r.db.ExecContext(ctx, `
+	executor := executorFromContext(ctx, r.db)
+	_, err := executor.ExecContext(ctx, `
 		INSERT INTO projects (id, title, summary, status, created_at, updated_at)
 		VALUES ($1, $2, $3, $4, $5, $6)
 	`, entity.ID, entity.Title, entity.Summary, entity.Status, entity.CreatedAt, entity.UpdatedAt)
@@ -36,7 +37,8 @@ func (r *ProjectRepository) Create(ctx context.Context, entity *projectdomain.Pr
 
 func (r *ProjectRepository) GetByID(ctx context.Context, id string) (*projectdomain.Project, error) {
 	entity := &projectdomain.Project{}
-	err := r.db.QueryRowContext(ctx, `
+	executor := executorFromContext(ctx, r.db)
+	err := executor.QueryRowContext(ctx, `
 		SELECT id, title, summary, status, created_at, updated_at
 		FROM projects
 		WHERE id = $1
@@ -67,7 +69,8 @@ func (r *ProjectRepository) List(ctx context.Context, params projectdomain.ListP
 	query += ` ORDER BY created_at ASC, id ASC`
 	query, args = appendPagination(query, params.Limit, params.Offset, args)
 
-	rows, err := r.db.QueryContext(ctx, query, args...)
+	executor := executorFromContext(ctx, r.db)
+	rows, err := executor.QueryContext(ctx, query, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -102,7 +105,8 @@ func (r *ProjectRepository) Update(ctx context.Context, entity *projectdomain.Pr
 		return err
 	}
 
-	result, err := r.db.ExecContext(ctx, `
+	executor := executorFromContext(ctx, r.db)
+	result, err := executor.ExecContext(ctx, `
 		UPDATE projects
 		SET title = $2, summary = $3, status = $4, updated_at = $5
 		WHERE id = $1
@@ -124,7 +128,8 @@ func (r *ProjectRepository) UpdateIfUnchanged(ctx context.Context, entity *proje
 		return false, fmt.Errorf("expected_updated_at must not be zero")
 	}
 
-	result, err := r.db.ExecContext(ctx, `
+	executor := executorFromContext(ctx, r.db)
+	result, err := executor.ExecContext(ctx, `
 		UPDATE projects
 		SET title = $2, summary = $3, status = $4, updated_at = $5
 		WHERE id = $1 AND updated_at = $6

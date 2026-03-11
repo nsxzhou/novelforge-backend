@@ -9,12 +9,12 @@ import (
 
 func validPromptConfig() PromptConfig {
 	return PromptConfig{
-		"asset_generation":     "asset_generation.yaml",
-		"chapter_generation":   "chapter_generation.yaml",
-		"chapter_continuation": "chapter_continuation.yaml",
-		"chapter_rewrite":      "chapter_rewrite.yaml",
-		"project_refinement":   "project_refinement.yaml",
-		"asset_refinement":     "asset_refinement.yaml",
+		AssetGeneration:     "asset_generation.yaml",
+		ChapterGeneration:   "chapter_generation.yaml",
+		ChapterContinuation: "chapter_continuation.yaml",
+		ChapterRewrite:      "chapter_rewrite.yaml",
+		ProjectRefinement:   "project_refinement.yaml",
+		AssetRefinement:     "asset_refinement.yaml",
 	}
 }
 
@@ -81,14 +81,56 @@ func TestPromptConfigValidate(t *testing.T) {
 		wantErr string
 	}{
 		{name: "valid", cfg: validPromptConfig()},
-		{name: "missing asset generation prompt", cfg: PromptConfig{"chapter_generation": "chapter_generation.yaml", "chapter_continuation": "chapter_continuation.yaml", "chapter_rewrite": "chapter_rewrite.yaml", "project_refinement": "project_refinement.yaml", "asset_refinement": "asset_refinement.yaml"}, wantErr: "asset_generation must not be empty"},
-		{name: "missing chapter generation prompt", cfg: PromptConfig{"asset_generation": "asset_generation.yaml", "chapter_continuation": "chapter_continuation.yaml", "chapter_rewrite": "chapter_rewrite.yaml", "project_refinement": "project_refinement.yaml", "asset_refinement": "asset_refinement.yaml"}, wantErr: "chapter_generation must not be empty"},
-		{name: "missing chapter continuation prompt", cfg: PromptConfig{"asset_generation": "asset_generation.yaml", "chapter_generation": "chapter_generation.yaml", "chapter_rewrite": "chapter_rewrite.yaml", "project_refinement": "project_refinement.yaml", "asset_refinement": "asset_refinement.yaml"}, wantErr: "chapter_continuation must not be empty"},
-		{name: "missing chapter rewrite prompt", cfg: PromptConfig{"asset_generation": "asset_generation.yaml", "chapter_generation": "chapter_generation.yaml", "chapter_continuation": "chapter_continuation.yaml", "project_refinement": "project_refinement.yaml", "asset_refinement": "asset_refinement.yaml"}, wantErr: "chapter_rewrite must not be empty"},
-		{name: "missing project refinement prompt", cfg: PromptConfig{"asset_generation": "asset_generation.yaml", "chapter_generation": "chapter_generation.yaml", "chapter_continuation": "chapter_continuation.yaml", "chapter_rewrite": "chapter_rewrite.yaml", "asset_refinement": "asset_refinement.yaml"}, wantErr: "project_refinement must not be empty"},
-		{name: "missing asset refinement prompt", cfg: PromptConfig{"asset_generation": "asset_generation.yaml", "chapter_generation": "chapter_generation.yaml", "chapter_continuation": "chapter_continuation.yaml", "chapter_rewrite": "chapter_rewrite.yaml", "project_refinement": "project_refinement.yaml"}, wantErr: "asset_refinement must not be empty"},
-		{name: "unsupported kind", cfg: PromptConfig{"asset_generation": "asset_generation.yaml", "chapter_generation": "chapter_generation.yaml", "chapter_continuation": "chapter_continuation.yaml", "chapter_rewrite": "chapter_rewrite.yaml", "project_refinement": "project_refinement.yaml", "asset_refinement": "asset_refinement.yaml", "unsupported": "unsupported.yaml"}, wantErr: "\"unsupported\" is not a supported prompt kind"},
-		{name: "empty filename", cfg: PromptConfig{"asset_generation": "asset_generation.yaml", "chapter_generation": "chapter_generation.yaml", "chapter_continuation": "chapter_continuation.yaml", "chapter_rewrite": "chapter_rewrite.yaml", "project_refinement": "project_refinement.yaml", "asset_refinement": ""}, wantErr: "asset_refinement must not be empty"},
+		{name: "missing asset generation prompt", cfg: PromptConfig{
+			ChapterGeneration:   "chapter_generation.yaml",
+			ChapterContinuation: "chapter_continuation.yaml",
+			ChapterRewrite:      "chapter_rewrite.yaml",
+			ProjectRefinement:   "project_refinement.yaml",
+			AssetRefinement:     "asset_refinement.yaml",
+		}, wantErr: "asset_generation must not be empty"},
+		{name: "missing chapter generation prompt", cfg: PromptConfig{
+			AssetGeneration:     "asset_generation.yaml",
+			ChapterContinuation: "chapter_continuation.yaml",
+			ChapterRewrite:      "chapter_rewrite.yaml",
+			ProjectRefinement:   "project_refinement.yaml",
+			AssetRefinement:     "asset_refinement.yaml",
+		}, wantErr: "chapter_generation must not be empty"},
+		{name: "missing chapter continuation prompt", cfg: PromptConfig{
+			AssetGeneration:   "asset_generation.yaml",
+			ChapterGeneration: "chapter_generation.yaml",
+			ChapterRewrite:    "chapter_rewrite.yaml",
+			ProjectRefinement: "project_refinement.yaml",
+			AssetRefinement:   "asset_refinement.yaml",
+		}, wantErr: "chapter_continuation must not be empty"},
+		{name: "missing chapter rewrite prompt", cfg: PromptConfig{
+			AssetGeneration:     "asset_generation.yaml",
+			ChapterGeneration:   "chapter_generation.yaml",
+			ChapterContinuation: "chapter_continuation.yaml",
+			ProjectRefinement:   "project_refinement.yaml",
+			AssetRefinement:     "asset_refinement.yaml",
+		}, wantErr: "chapter_rewrite must not be empty"},
+		{name: "missing project refinement prompt", cfg: PromptConfig{
+			AssetGeneration:     "asset_generation.yaml",
+			ChapterGeneration:   "chapter_generation.yaml",
+			ChapterContinuation: "chapter_continuation.yaml",
+			ChapterRewrite:      "chapter_rewrite.yaml",
+			AssetRefinement:     "asset_refinement.yaml",
+		}, wantErr: "project_refinement must not be empty"},
+		{name: "missing asset refinement prompt", cfg: PromptConfig{
+			AssetGeneration:     "asset_generation.yaml",
+			ChapterGeneration:   "chapter_generation.yaml",
+			ChapterContinuation: "chapter_continuation.yaml",
+			ChapterRewrite:      "chapter_rewrite.yaml",
+			ProjectRefinement:   "project_refinement.yaml",
+		}, wantErr: "asset_refinement must not be empty"},
+		{name: "empty filename", cfg: PromptConfig{
+			AssetGeneration:     "asset_generation.yaml",
+			ChapterGeneration:   "chapter_generation.yaml",
+			ChapterContinuation: "chapter_continuation.yaml",
+			ChapterRewrite:      "chapter_rewrite.yaml",
+			ProjectRefinement:   "project_refinement.yaml",
+			AssetRefinement:     "",
+		}, wantErr: "asset_refinement must not be empty"},
 	}
 
 	for _, tt := range tests {
@@ -250,6 +292,45 @@ llm:
 		}
 		if !strings.Contains(err.Error(), "unmarshal config yaml") {
 			t.Fatalf("Load() error = %v, want yaml wrapper", err)
+		}
+	})
+
+	t.Run("unknown prompt key", func(t *testing.T) {
+		dir := t.TempDir()
+		path := filepath.Join(dir, "unknown-prompt.yaml")
+		content := `
+server:
+  host: "127.0.0.1"
+  port: 8080
+  read_timeout_seconds: 10
+  write_timeout_seconds: 10
+storage:
+  provider: "memory"
+llm:
+  provider: "openai_compatible"
+  model: "gpt-4o-mini"
+  base_url: "https://api.openai.com/v1"
+  api_key_env: "NOVELFORGE_LLM_API_KEY"
+  timeout_seconds: 60
+  prompts:
+    asset_generation: "asset_generation.yaml"
+    chapter_generation: "chapter_generation.yaml"
+    chapter_continuation: "chapter_continuation.yaml"
+    chapter_rewrite: "chapter_rewrite.yaml"
+    project_refinement: "project_refinement.yaml"
+    asset_refinement: "asset_refinement.yaml"
+    unsupported_kind: "unsupported.yaml"
+`
+		if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+			t.Fatalf("WriteFile() error = %v", err)
+		}
+
+		_, err := Load(path)
+		if err == nil {
+			t.Fatal("Load() error = nil, want unknown field error")
+		}
+		if !strings.Contains(err.Error(), "field unsupported_kind not found") {
+			t.Fatalf("Load() error = %v, want unknown prompt field error", err)
 		}
 	})
 }

@@ -272,14 +272,18 @@ func (u *useCase) renderPrompt(kind string, promptData map[string]string) (strin
 	if u.promptStore == nil {
 		return "", "", fmt.Errorf("prompt store is not configured")
 	}
-	template, ok := u.promptStore.Get(kind)
+	promptCapability, ok := appservice.PromptCapabilityForGenerationKind(kind)
 	if !ok {
-		return "", "", fmt.Errorf("prompt template %q not found", kind)
+		return "", "", fmt.Errorf("unsupported generation kind %q", kind)
+	}
+	template, ok := u.promptStore.Get(promptCapability)
+	if !ok {
+		return "", "", fmt.Errorf("prompt template %q not found", promptCapability)
 	}
 
 	systemPrompt, userPrompt, err := template.Render(promptData)
 	if err != nil {
-		return "", "", fmt.Errorf("render prompt template %q: %w", kind, err)
+		return "", "", fmt.Errorf("render prompt template %q: %w", promptCapability, err)
 	}
 	return systemPrompt, userPrompt, nil
 }

@@ -1,6 +1,7 @@
 package config
 
 import (
+	"bytes"
 	"fmt"
 	"os"
 	"strings"
@@ -44,8 +45,39 @@ type PostgresConfig struct {
 	ConnMaxLifetimeSeconds int    `yaml:"conn_max_lifetime_seconds"`
 }
 
-// PromptConfig maps generation kinds to prompt template file names.
-type PromptConfig map[string]string
+// PromptCapability 标识一类受支持的 Prompt 能力。
+type PromptCapability string
+
+const (
+	PromptCapabilityAssetGeneration     PromptCapability = "asset_generation"
+	PromptCapabilityChapterGeneration   PromptCapability = "chapter_generation"
+	PromptCapabilityChapterContinuation PromptCapability = "chapter_continuation"
+	PromptCapabilityChapterRewrite      PromptCapability = "chapter_rewrite"
+	PromptCapabilityProjectRefinement   PromptCapability = "project_refinement"
+	PromptCapabilityAssetRefinement     PromptCapability = "asset_refinement"
+)
+
+// AllPromptCapabilities 返回当前版本支持的全部 Prompt 能力。
+func AllPromptCapabilities() []PromptCapability {
+	return []PromptCapability{
+		PromptCapabilityAssetGeneration,
+		PromptCapabilityChapterGeneration,
+		PromptCapabilityChapterContinuation,
+		PromptCapabilityChapterRewrite,
+		PromptCapabilityProjectRefinement,
+		PromptCapabilityAssetRefinement,
+	}
+}
+
+// PromptConfig holds prompt template file names for every supported capability.
+type PromptConfig struct {
+	AssetGeneration     string `yaml:"asset_generation"`
+	ChapterGeneration   string `yaml:"chapter_generation"`
+	ChapterContinuation string `yaml:"chapter_continuation"`
+	ChapterRewrite      string `yaml:"chapter_rewrite"`
+	ProjectRefinement   string `yaml:"project_refinement"`
+	AssetRefinement     string `yaml:"asset_refinement"`
+}
 
 // LLMConfig holds LLM provider wiring options.
 type LLMConfig struct {
@@ -65,7 +97,9 @@ func Load(path string) (*AppConfig, error) {
 	}
 
 	cfg := &AppConfig{}
-	if err := yaml.Unmarshal(content, cfg); err != nil {
+	decoder := yaml.NewDecoder(bytes.NewReader(content))
+	decoder.KnownFields(true)
+	if err := decoder.Decode(cfg); err != nil {
 		return nil, fmt.Errorf("unmarshal config yaml: %w", err)
 	}
 
@@ -153,43 +187,32 @@ func (c PostgresConfig) Validate() error {
 
 // Validate validates prompt configuration.
 func (c PromptConfig) Validate() error {
-	requiredKinds := []string{
-		"asset_generation",
-		"chapter_generation",
-		"chapter_continuation",
-		"chapter_rewrite",
-		"project_refinement",
-		"asset_refinement",
-	}
-	allowedKinds := map[string]struct{}{
-		"asset_generation":     {},
-		"chapter_generation":   {},
-		"chapter_continuation": {},
-		"chapter_rewrite":      {},
-		"project_refinement":   {},
-		"asset_refinement":     {},
-	}
-
-	for _, kind := range requiredKinds {
-		filename, ok := c[kind]
-		if !ok || strings.TrimSpace(filename) == "" {
-			return fmt.Errorf("%s must not be empty", kind)
+	for _, capability := range AllPromptCapabilities() {
+		if strings.TrimSpace(c.FilenameFor(capability)) == "" {
+			return fmt.Errorf("%s must not be empty", capability)
 		}
 	}
-
-	for kind, filename := range c {
-		if strings.TrimSpace(kind) == "" {
-			return fmt.Errorf("prompt kind must not be empty")
-		}
-		if _, ok := allowedKinds[kind]; !ok {
-			return fmt.Errorf("%q is not a supported prompt kind", kind)
-		}
-		if strings.TrimSpace(filename) == "" {
-			return fmt.Errorf("%s must not be empty", kind)
-		}
-	}
-
 	return nil
+}
+
+// FilenameFor 返回指定能力对应的模板文件名。
+func (c PromptConfig) FilenameFor(capability PromptCapability) string {
+	switch capability {
+	case PromptCapabilityAssetGeneration:
+		return c.AssetGeneration
+	case PromptCapabilityChapterGeneration:
+		return c.ChapterGeneration
+	case PromptCapabilityChapterContinuation:
+		return c.ChapterContinuation
+	case PromptCapabilityChapterRewrite:
+		return c.ChapterRewrite
+	case PromptCapabilityProjectRefinement:
+		return c.ProjectRefinement
+	case PromptCapabilityAssetRefinement:
+		return c.AssetRefinement
+	default:
+		return ""
+	}
 }
 
 // Validate validates LLM configuration.

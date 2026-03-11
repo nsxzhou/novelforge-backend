@@ -27,6 +27,7 @@ func (r *ConversationRepository) Create(ctx context.Context, entity *conversatio
 		return err
 	}
 
+	executor := executorFromContext(ctx, r.db)
 	messages, err := marshalJSON(entity.Messages)
 	if err != nil {
 		return err
@@ -35,7 +36,7 @@ func (r *ConversationRepository) Create(ctx context.Context, entity *conversatio
 	if err != nil {
 		return err
 	}
-	_, err = r.db.ExecContext(ctx, `
+	_, err = executor.ExecContext(ctx, `
 		INSERT INTO conversations (id, project_id, target_type, target_id, messages, pending_suggestion, created_at, updated_at)
 		VALUES ($1, $2, $3, $4, $5::jsonb, $6::jsonb, $7, $8)
 	`, entity.ID, entity.ProjectID, entity.TargetType, entity.TargetID, messages, pendingSuggestion, entity.CreatedAt, entity.UpdatedAt)
@@ -44,9 +45,10 @@ func (r *ConversationRepository) Create(ctx context.Context, entity *conversatio
 
 func (r *ConversationRepository) GetByID(ctx context.Context, id string) (*conversationdomain.Conversation, error) {
 	entity := &conversationdomain.Conversation{}
+	executor := executorFromContext(ctx, r.db)
 	var rawMessages []byte
 	var rawPendingSuggestion []byte
-	if err := r.db.QueryRowContext(ctx, `
+	if err := executor.QueryRowContext(ctx, `
 		SELECT id, project_id, target_type, target_id, messages, pending_suggestion, created_at, updated_at
 		FROM conversations
 		WHERE id = $1
@@ -79,6 +81,7 @@ func (r *ConversationRepository) Update(ctx context.Context, entity *conversatio
 		return err
 	}
 
+	executor := executorFromContext(ctx, r.db)
 	messages, err := marshalJSON(entity.Messages)
 	if err != nil {
 		return err
@@ -87,7 +90,7 @@ func (r *ConversationRepository) Update(ctx context.Context, entity *conversatio
 	if err != nil {
 		return err
 	}
-	result, err := r.db.ExecContext(ctx, `
+	result, err := executor.ExecContext(ctx, `
 		UPDATE conversations
 		SET messages = $2::jsonb, pending_suggestion = $3::jsonb, updated_at = $4
 		WHERE id = $1
@@ -109,6 +112,7 @@ func (r *ConversationRepository) UpdateIfUnchanged(ctx context.Context, entity *
 		return false, fmt.Errorf("expected_updated_at must not be zero")
 	}
 
+	executor := executorFromContext(ctx, r.db)
 	messages, err := marshalJSON(entity.Messages)
 	if err != nil {
 		return false, err
@@ -117,7 +121,7 @@ func (r *ConversationRepository) UpdateIfUnchanged(ctx context.Context, entity *
 	if err != nil {
 		return false, err
 	}
-	result, err := r.db.ExecContext(ctx, `
+	result, err := executor.ExecContext(ctx, `
 		UPDATE conversations
 		SET messages = $2::jsonb, pending_suggestion = $3::jsonb, updated_at = $4
 		WHERE id = $1 AND updated_at = $5
@@ -141,6 +145,7 @@ func (r *ConversationRepository) AppendMessage(ctx context.Context, params conve
 		return err
 	}
 
+	executor := executorFromContext(ctx, r.db)
 	entity, err := r.GetByID(ctx, params.ConversationID)
 	if err != nil {
 		return err
@@ -153,7 +158,7 @@ func (r *ConversationRepository) AppendMessage(ctx context.Context, params conve
 	if err != nil {
 		return err
 	}
-	result, err := r.db.ExecContext(ctx, `
+	result, err := executor.ExecContext(ctx, `
 		UPDATE conversations
 		SET messages = $2::jsonb, updated_at = $3
 		WHERE id = $1
@@ -189,7 +194,8 @@ func (r *ConversationRepository) ListByTarget(ctx context.Context, params conver
 }
 
 func (r *ConversationRepository) list(ctx context.Context, query string, args ...any) ([]*conversationdomain.Conversation, error) {
-	rows, err := r.db.QueryContext(ctx, query, args...)
+	executor := executorFromContext(ctx, r.db)
+	rows, err := executor.QueryContext(ctx, query, args...)
 	if err != nil {
 		return nil, err
 	}

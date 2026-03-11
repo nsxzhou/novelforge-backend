@@ -26,6 +26,7 @@ func NewRepositories(cfg config.StorageConfig) (*Repositories, error) {
 			Conversations:     memory.NewConversationRepository(),
 			GenerationRecords: memory.NewGenerationRecordRepository(),
 			MetricEvents:      memory.NewMetricEventRepository(),
+			TxRunner:          noopTxRunner{},
 		}, nil
 	case config.StorageProviderPostgres:
 		provider, err := newPostgresProvider(context.Background(), cfg.Postgres)
@@ -40,10 +41,20 @@ func NewRepositories(cfg config.StorageConfig) (*Repositories, error) {
 			Conversations:     postgres.NewConversationRepository(provider.DB()),
 			GenerationRecords: postgres.NewGenerationRecordRepository(provider.DB()),
 			MetricEvents:      postgres.NewMetricEventRepository(provider.DB()),
+			TxRunner:          postgres.NewTxRunner(provider.DB()),
 			readiness:         provider,
 			closeFunc:         provider.Close,
 		}, nil
 	default:
 		return nil, fmt.Errorf("unsupported storage provider %q", cfg.Provider)
 	}
+}
+
+type noopTxRunner struct{}
+
+func (noopTxRunner) InTx(ctx context.Context, fn func(context.Context) error) error {
+	if fn == nil {
+		return nil
+	}
+	return fn(ctx)
 }

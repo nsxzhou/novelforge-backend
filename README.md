@@ -35,6 +35,7 @@
   - `POST /api/v1/conversations/:conversationID/messages`
   - `POST /api/v1/conversations/:conversationID/confirm`
 - 已接入 OpenAI 兼容 LLM 客户端装配、Prompt 模板注册表，以及 Project / Asset 对话驱动微调链路（建议生成 -> 显式确认 -> 写回）和章节生成主链路（生成 / 续写 / 局部重写）
+- Prompt 能力映射已类型化（`PromptCapability`），业务侧不再依赖散落的字符串键
 
 ### 领域模型层 (`internal/domain`)
 
@@ -55,6 +56,7 @@ V1 全部 6 个领域聚合已落地，每个聚合包含实体定义（`model.g
 - 内存存储实现（`storage/memory`）：保留用于轻量测试与回归
 - PostgreSQL 存储实现（`storage/postgres`）：覆盖 6 个聚合、迁移入口和数据库就绪检查
 - 存储配置支持（`StorageConfig`）：通过 `provider` 字段切换 `memory` 与 `postgres`
+- PostgreSQL provider 已支持事务执行器（`TxRunner`），并通过 `context` 透传到各 repository 执行 SQL
 
 ### 服务用例层 (`internal/service`)
 
@@ -62,7 +64,7 @@ V1 全部 6 个领域聚合已落地，每个聚合包含实体定义（`model.g
 
 - `service/project`：项目创建 / 列表 / 查询 / 更新
 - `service/asset`：资产创建 / AI 生成 / 列表 / 按类型过滤 / 查询 / 更新 / 删除
-- `service/conversation`：对话发起 / 继续 / 查询 / 按 project/target 列表 / 显式确认写回 Project / Asset
+- `service/conversation`：对话发起 / 继续 / 查询 / 按 project/target 列表 / 显式确认写回 Project / Asset（confirm 路径在事务内执行，保证目标写回与会话清理原子提交）
 - `service/chapter`：章节生成 / 列表 / 查询 / 当前稿确认 / 续写 / 局部重写，并为章节生成流创建和更新 `GenerationRecord`
 - `service/metric`：指标事件 append/list 用例实现，已接入章节与对话微调业务采集流程
 
@@ -161,7 +163,7 @@ Prompt 模板文件位于：
 - `system`
 - `user`
 
-Prompt 模板内容通过 `go:embed` 编译进二进制。服务启动时会按配置预加载并校验模板文件语法；修改模板文件后需要重新构建并重新部署服务。当前 `asset_generation` / `project_refinement` / `asset_refinement` 已接入资产生成与 Project / Asset 对话微调链路；`chapter_generation` / `chapter_continuation` / `chapter_rewrite` 已接入章节生成、续写与局部重写业务。
+Prompt 模板内容通过 `go:embed` 编译进二进制。服务启动时会按配置预加载并校验模板文件语法；修改模板文件后需要重新构建并重新部署服务。`llm.prompts` 配置采用显式字段并启用 YAML unknown field 校验，避免配置键与能力映射漂移。当前 `asset_generation` / `project_refinement` / `asset_refinement` 已接入资产生成与 Project / Asset 对话微调链路；`chapter_generation` / `chapter_continuation` / `chapter_rewrite` 已接入章节生成、续写与局部重写业务。
 
 数据库 schema 迁移文件位于：
 
@@ -185,7 +187,7 @@ go test ./...
 
 - 项目 / 资产 / 对话微调 HTTP handler 集成测试（基于内存仓储）
 - Conversation service 单元测试覆盖 `start / reply / get_by_id / list / confirm(project|asset)` 主路径与关键失败分支（无 pending suggestion、target 归属校验等）
-- Conversation confirm 已覆盖 optimistic locking 冲突路径（project/asset/conversation 并发更新返回冲突）
+- Conversation confirm 已覆盖 optimistic locking 冲突路径（project/asset/conversation 并发更新返回冲突）与事务回滚路径（目标写回后会话更新失败时整体回滚）
 - Chapter service 与 handler 测试覆盖公共用例 `create / get_by_id / list_by_project / update`，以及章节生成链路中的当前稿确认、重复确认幂等、未完成草稿拒绝与冲突映射
 - Chapter rewrite 成功链路测试覆盖 `GenerationRecord` 成功落库与章节确认状态重置（`current_draft_confirmed_at/by` 清空）
 - Conversation confirm handler 集成测试覆盖 asset 响应分支（`project` 为空、`asset` 返回已确认内容）
@@ -200,6 +202,7 @@ go test ./...
 - 项目 / 资产 CRUD、Project / Asset 对话微调，以及章节生成 / 当前稿确认 / 续写 / 局部重写链路已完成；章节生成流会创建并持久化 `GenerationRecord`
 - `POST /api/v1/chapters/:chapterID/confirm` 已实现显式的“确认当前稿”业务流；请求需通过 `X-User-ID` 请求头传入合法 UUID，系统会把该值写入 `current_draft_confirmed_by`
 - 当前稿确认仅允许作用于 `current_draft_id` 指向且状态为 `succeeded` 的生成记录；同一草稿重复确认保持幂等；若章节在确认期间被续写/改写并更新，则返回冲突错误提示重试
+- `POST /api/v1/conversations/:conversationID/confirm` 在 `postgres` 运行态下以单事务执行目标写回与会话状态更新；若会话更新失败会回滚目标写入
 - V1 仅完成埋点采集，不包含可视化看板；`token_usage` 口径当前沿用业务记录字段（默认 0）
 - 直接通过 `cmd/server` 启动 `postgres` 模式服务时会在 bootstrap 阶段自动执行 migration；若迁移失败则启动直接失败
 - `memory` provider 仍然保留，但目标是用于测试而不是默认运行态持久化

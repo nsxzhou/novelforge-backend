@@ -103,6 +103,7 @@ func LoadBootstrap(configPath string) (*Bootstrap, error) {
 		LLMClient:     llmClient,
 		PromptStore:   promptStore,
 		Metrics:       metricUseCase,
+		TxRunner:      repositories.TxRunner,
 	})
 
 	httpServer := httpinfra.NewServer(cfg.Server, httpinfra.Dependencies{

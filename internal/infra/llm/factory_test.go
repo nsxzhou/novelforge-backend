@@ -11,7 +11,6 @@ import (
 	"github.com/cloudwego/eino/components/model"
 	"github.com/cloudwego/eino/schema"
 
-	"novelforge/backend/internal/domain/generation"
 	"novelforge/backend/pkg/config"
 )
 
@@ -37,12 +36,12 @@ func validLLMConfig(apiKeyEnv string) config.LLMConfig {
 		APIKeyEnv:      apiKeyEnv,
 		TimeoutSeconds: 60,
 		Prompts: config.PromptConfig{
-			generation.KindAssetGeneration:   "asset_generation.yaml",
-			generation.KindChapterGeneration: "chapter_generation.yaml",
-			generation.KindChapterContinuation: "chapter_continuation.yaml",
-			generation.KindChapterRewrite:      "chapter_rewrite.yaml",
-			"project_refinement":             "project_refinement.yaml",
-			"asset_refinement":               "asset_refinement.yaml",
+			AssetGeneration:     "asset_generation.yaml",
+			ChapterGeneration:   "chapter_generation.yaml",
+			ChapterContinuation: "chapter_continuation.yaml",
+			ChapterRewrite:      "chapter_rewrite.yaml",
+			ProjectRefinement:   "project_refinement.yaml",
+			AssetRefinement:     "asset_refinement.yaml",
 		},
 	}
 }

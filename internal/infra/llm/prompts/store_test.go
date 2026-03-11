@@ -12,12 +12,12 @@ import (
 
 func validPromptConfig() config.PromptConfig {
 	return config.PromptConfig{
-		generation.KindAssetGeneration:      "asset_generation.yaml",
-		generation.KindChapterGeneration:    "chapter_generation.yaml",
-		generation.KindChapterContinuation:  "chapter_continuation.yaml",
-		generation.KindChapterRewrite:       "chapter_rewrite.yaml",
-		"project_refinement":              "project_refinement.yaml",
-		"asset_refinement":                "asset_refinement.yaml",
+		AssetGeneration:     "asset_generation.yaml",
+		ChapterGeneration:   "chapter_generation.yaml",
+		ChapterContinuation: "chapter_continuation.yaml",
+		ChapterRewrite:      "chapter_rewrite.yaml",
+		ProjectRefinement:   "project_refinement.yaml",
+		AssetRefinement:     "asset_refinement.yaml",
 	}
 }
 
@@ -32,12 +32,12 @@ func withTemplateFS(t *testing.T, filesystem fs.FS) {
 
 func TestLoadStoreSuccess(t *testing.T) {
 	withTemplateFS(t, fstest.MapFS{
-		"asset_generation.yaml":      {Data: []byte("system: |\n  asset system\nuser: |\n  asset user {{ .Instruction }}\n")},
-		"chapter_generation.yaml":    {Data: []byte("system: |\n  chapter system\nuser: |\n  chapter user {{ .OutlineContext }}\n")},
-		"chapter_continuation.yaml":  {Data: []byte("system: |\n  continuation system\nuser: |\n  continuation user {{ .CurrentChapterContent }}\n")},
-		"chapter_rewrite.yaml":       {Data: []byte("system: |\n  rewrite system\nuser: |\n  rewrite user {{ .TargetText }}\n")},
-		"project_refinement.yaml":    {Data: []byte("system: |\n  refinement system\nuser: |\n  refine project {{ .LatestUserMessage }}\n")},
-		"asset_refinement.yaml":      {Data: []byte("system: |\n  asset refinement system\nuser: |\n  refine asset {{ .LatestUserMessage }}\n")},
+		"asset_generation.yaml":     {Data: []byte("system: |\n  asset system\nuser: |\n  asset user {{ .Instruction }}\n")},
+		"chapter_generation.yaml":   {Data: []byte("system: |\n  chapter system\nuser: |\n  chapter user {{ .OutlineContext }}\n")},
+		"chapter_continuation.yaml": {Data: []byte("system: |\n  continuation system\nuser: |\n  continuation user {{ .CurrentChapterContent }}\n")},
+		"chapter_rewrite.yaml":      {Data: []byte("system: |\n  rewrite system\nuser: |\n  rewrite user {{ .TargetText }}\n")},
+		"project_refinement.yaml":   {Data: []byte("system: |\n  refinement system\nuser: |\n  refine project {{ .LatestUserMessage }}\n")},
+		"asset_refinement.yaml":     {Data: []byte("system: |\n  asset refinement system\nuser: |\n  refine asset {{ .LatestUserMessage }}\n")},
 	})
 
 	store, err := LoadStore(validPromptConfig())
@@ -59,7 +59,7 @@ func TestLoadStoreSuccess(t *testing.T) {
 	if _, ok := store.Get(generation.KindChapterRewrite); !ok {
 		t.Fatal("Get(chapter_rewrite) = false, want true")
 	}
-	projectTemplate, ok := store.Get("project_refinement")
+	projectTemplate, ok := store.Get(config.PromptCapabilityProjectRefinement)
 	if !ok {
 		t.Fatal("Get(project_refinement) = false, want true")
 	}

@@ -3,6 +3,7 @@ package conversation
 import (
 	"context"
 	"errors"
+	"regexp"
 	"strings"
 	"testing"
 	"time"
@@ -14,10 +15,12 @@ import (
 	"novelforge/backend/internal/infra/llm"
 	"novelforge/backend/internal/infra/llm/prompts"
 	"novelforge/backend/internal/infra/storage/memory"
+	"novelforge/backend/internal/infra/storage/postgres"
 	appservice "novelforge/backend/internal/service"
 	metricservice "novelforge/backend/internal/service/metric"
 	"novelforge/backend/pkg/config"
 
+	"github.com/DATA-DOG/go-sqlmock"
 	"github.com/cloudwego/eino/components/model"
 	"github.com/cloudwego/eino/schema"
 	"github.com/google/uuid"
@@ -55,12 +58,12 @@ func (s *stubLLMClient) ChatModel() model.ToolCallingChatModel {
 func loadTestPromptStore(t *testing.T) *prompts.Store {
 	t.Helper()
 	store, err := prompts.LoadStore(config.PromptConfig{
-		"asset_generation":     "asset_generation.yaml",
-		"chapter_generation":   "chapter_generation.yaml",
-		"chapter_continuation": "chapter_continuation.yaml",
-		"chapter_rewrite":      "chapter_rewrite.yaml",
-		"project_refinement":   "project_refinement.yaml",
-		"asset_refinement":     "asset_refinement.yaml",
+		AssetGeneration:     "asset_generation.yaml",
+		ChapterGeneration:   "chapter_generation.yaml",
+		ChapterContinuation: "chapter_continuation.yaml",
+		ChapterRewrite:      "chapter_rewrite.yaml",
+		ProjectRefinement:   "project_refinement.yaml",
+		AssetRefinement:     "asset_refinement.yaml",
 	})
 	if err != nil {
 		t.Fatalf("LoadStore() error = %v", err)
@@ -795,6 +798,110 @@ func TestUseCaseConfirmReturnsConflictWhenConversationUpdatedConcurrently(t *tes
 	}
 	if !strings.Contains(err.Error(), "conversation was modified during confirmation") {
 		t.Fatalf("Confirm() error = %v, want conversation conflict message", err)
+	}
+}
+
+func TestUseCaseConfirmRollsBackWhenConversationUpdateFailsInTransaction(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock.New() error = %v", err)
+	}
+	defer db.Close()
+
+	baseTime := time.Date(2026, 3, 9, 18, 0, 0, 0, time.UTC)
+	projectID := "11111111-1111-1111-1111-111111111111"
+	conversationID := "22222222-2222-2222-2222-222222222222"
+	messageID := "33333333-3333-3333-3333-333333333333"
+	messagesJSON := `[{"ID":"` + messageID + `","Role":"assistant","Content":"{\"title\":\"Confirmed title\",\"summary\":\"Confirmed summary\"}","CreatedAt":"2026-03-09T18:01:00Z"}]`
+
+	mock.ExpectBegin()
+	mock.ExpectQuery(regexp.QuoteMeta(`
+		SELECT id, project_id, target_type, target_id, messages, pending_suggestion, created_at, updated_at
+		FROM conversations
+		WHERE id = $1
+	`)).WithArgs(conversationID).WillReturnRows(sqlmock.NewRows([]string{
+		"id", "project_id", "target_type", "target_id", "messages", "pending_suggestion", "created_at", "updated_at",
+	}).AddRow(
+		conversationID,
+		projectID,
+		conversationdomain.TargetTypeProject,
+		projectID,
+		messagesJSON,
+		`{"title":"Confirmed title","summary":"Confirmed summary"}`,
+		baseTime,
+		baseTime.Add(time.Minute),
+	))
+	mock.ExpectQuery(regexp.QuoteMeta(`
+		SELECT id, title, summary, status, created_at, updated_at
+		FROM projects
+		WHERE id = $1
+	`)).WithArgs(projectID).WillReturnRows(sqlmock.NewRows([]string{
+		"id", "title", "summary", "status", "created_at", "updated_at",
+	}).AddRow(
+		projectID,
+		"Original title",
+		"Original summary",
+		projectdomain.StatusDraft,
+		baseTime,
+		baseTime,
+	))
+	mock.ExpectExec(`UPDATE projects`).WithArgs(
+		projectID,
+		"Confirmed title",
+		"Confirmed summary",
+		projectdomain.StatusDraft,
+		sqlmock.AnyArg(),
+		baseTime,
+	).WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectExec(`UPDATE conversations`).WithArgs(
+		conversationID,
+		sqlmock.AnyArg(),
+		sqlmock.AnyArg(),
+		sqlmock.AnyArg(),
+		baseTime.Add(time.Minute),
+	).WillReturnError(errors.New("conversation write failed"))
+	mock.ExpectRollback()
+
+	projectRepo := postgres.NewProjectRepository(db)
+	useCase := NewUseCase(Dependencies{
+		Conversations: postgres.NewConversationRepository(db),
+		Projects:      projectRepo,
+		Assets:        postgres.NewAssetRepository(db),
+		TxRunner:      postgres.NewTxRunner(db),
+	})
+
+	_, err = useCase.Confirm(context.Background(), conversationID)
+	if err == nil {
+		t.Fatal("Confirm() error = nil, want transactional failure")
+	}
+	if !strings.Contains(err.Error(), "conversation write failed") {
+		t.Fatalf("Confirm() error = %v, want conversation write failure", err)
+	}
+
+	mock.ExpectQuery(regexp.QuoteMeta(`
+		SELECT id, title, summary, status, created_at, updated_at
+		FROM projects
+		WHERE id = $1
+	`)).WithArgs(projectID).WillReturnRows(sqlmock.NewRows([]string{
+		"id", "title", "summary", "status", "created_at", "updated_at",
+	}).AddRow(
+		projectID,
+		"Original title",
+		"Original summary",
+		projectdomain.StatusDraft,
+		baseTime,
+		baseTime,
+	))
+	projectAfter, getErr := projectRepo.GetByID(context.Background(), projectID)
+	if getErr != nil {
+		t.Fatalf("GetByID(project) error = %v", getErr)
+	}
+	if projectAfter.Title != "Original title" || projectAfter.Summary != "Original summary" {
+		t.Fatalf("project after rollback = %#v, want original values", projectAfter)
+	}
+
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("sql expectations not met: %v", err)
 	}
 }
 

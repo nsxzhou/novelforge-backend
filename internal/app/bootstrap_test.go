@@ -169,10 +169,10 @@ func TestLoadBootstrapSuccessWiresPromptStore(t *testing.T) {
 	if bootstrap.PromptStore == nil {
 		t.Fatal("PromptStore = nil, want non-nil")
 	}
-	if _, ok := bootstrap.PromptStore.Get("asset_generation"); !ok {
+	if _, ok := bootstrap.PromptStore.Get(config.PromptCapabilityAssetGeneration); !ok {
 		t.Fatal("PromptStore.Get(asset_generation) = false, want true")
 	}
-	if _, ok := bootstrap.PromptStore.Get("project_refinement"); !ok {
+	if _, ok := bootstrap.PromptStore.Get(config.PromptCapabilityProjectRefinement); !ok {
 		t.Fatal("PromptStore.Get(project_refinement) = false, want true")
 	}
 }

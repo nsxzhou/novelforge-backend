@@ -1036,12 +1036,12 @@ func newTestServer() *server.Hertz {
 	metricRepo := memory.NewMetricEventRepository()
 	metricUseCase := metricservice.NewUseCase(metricservice.Dependencies{MetricEvents: metricRepo})
 	promptStore, err := prompts.LoadStore(config.PromptConfig{
-		"asset_generation":     "asset_generation.yaml",
-		"chapter_generation":   "chapter_generation.yaml",
-		"chapter_continuation": "chapter_continuation.yaml",
-		"chapter_rewrite":      "chapter_rewrite.yaml",
-		"project_refinement":   "project_refinement.yaml",
-		"asset_refinement":     "asset_refinement.yaml",
+		AssetGeneration:     "asset_generation.yaml",
+		ChapterGeneration:   "chapter_generation.yaml",
+		ChapterContinuation: "chapter_continuation.yaml",
+		ChapterRewrite:      "chapter_rewrite.yaml",
+		ProjectRefinement:   "project_refinement.yaml",
+		AssetRefinement:     "asset_refinement.yaml",
 	})
 	if err != nil {
 		panic(err)
