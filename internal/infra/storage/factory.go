@@ -26,6 +26,8 @@ func NewRepositories(cfg config.StorageConfig) (*Repositories, error) {
 			Conversations:     memory.NewConversationRepository(),
 			GenerationRecords: memory.NewGenerationRecordRepository(),
 			MetricEvents:      memory.NewMetricEventRepository(),
+			PromptOverrides:   memory.NewPromptOverrideRepository(),
+			LLMProviders:      memory.NewLLMProviderRepository(),
 			TxRunner:          noopTxRunner{},
 		}, nil
 	case config.StorageProviderPostgres:
@@ -41,6 +43,8 @@ func NewRepositories(cfg config.StorageConfig) (*Repositories, error) {
 			Conversations:     postgres.NewConversationRepository(provider.DB()),
 			GenerationRecords: postgres.NewGenerationRecordRepository(provider.DB()),
 			MetricEvents:      postgres.NewMetricEventRepository(provider.DB()),
+			PromptOverrides:   postgres.NewPromptOverrideRepository(provider.DB()),
+			LLMProviders:      postgres.NewLLMProviderRepository(provider.DB()),
 			TxRunner:          postgres.NewTxRunner(provider.DB()),
 			readiness:         provider,
 			closeFunc:         provider.Close,

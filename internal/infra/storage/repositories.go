@@ -7,8 +7,10 @@ import (
 	"novelforge/backend/internal/domain/chapter"
 	"novelforge/backend/internal/domain/conversation"
 	"novelforge/backend/internal/domain/generation"
+	"novelforge/backend/internal/domain/llmprovider"
 	"novelforge/backend/internal/domain/metric"
 	"novelforge/backend/internal/domain/project"
+	"novelforge/backend/internal/domain/prompt"
 )
 
 // ReadinessChecker reports whether the storage backend is ready.
@@ -29,6 +31,8 @@ type Repositories struct {
 	Conversations     conversation.ConversationRepository
 	GenerationRecords generation.GenerationRecordRepository
 	MetricEvents      metric.MetricEventRepository
+	PromptOverrides   prompt.OverrideRepository
+	LLMProviders      llmprovider.Repository
 	TxRunner          TxRunner
 
 	readiness ReadinessChecker
