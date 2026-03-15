@@ -14,6 +14,7 @@ import (
 	generationdomain "novelforge/backend/internal/domain/generation"
 	metricdomain "novelforge/backend/internal/domain/metric"
 	projectdomain "novelforge/backend/internal/domain/project"
+	promptdomain "novelforge/backend/internal/domain/prompt"
 	"novelforge/backend/internal/infra/llm"
 	"novelforge/backend/internal/infra/llm/prompts"
 	appservice "novelforge/backend/internal/service"
@@ -34,6 +35,7 @@ type useCase struct {
 	generationRecords generationdomain.GenerationRecordRepository
 	llmClient         llm.Client
 	promptStore       *prompts.Store
+	promptOverrides   promptdomain.OverrideRepository
 	metrics           metricservice.UseCase
 }
 
@@ -45,6 +47,7 @@ func NewUseCase(deps Dependencies) UseCase {
 		generationRecords: deps.GenerationRecords,
 		llmClient:         deps.LLMClient,
 		promptStore:       deps.PromptStore,
+		promptOverrides:   deps.PromptOverrides,
 		metrics:           deps.Metrics,
 	}
 }
@@ -204,7 +207,7 @@ func (u *useCase) Generate(ctx context.Context, params GenerateParams) (*Generat
 		return nil, translatedErr
 	}
 
-	systemPrompt, userPrompt, err := u.renderPrompt(generationdomain.KindAssetGeneration, map[string]string{
+	systemPrompt, userPrompt, err := u.renderPrompt(ctx, params.ProjectID, generationdomain.KindAssetGeneration, map[string]string{
 		"ProjectTitle":   projectEntity.Title,
 		"ProjectSummary": projectEntity.Summary,
 		"AssetType":      params.Type,
@@ -268,7 +271,7 @@ func (u *useCase) ensureProjectExists(ctx context.Context, projectID string) err
 	return nil
 }
 
-func (u *useCase) renderPrompt(kind string, promptData map[string]string) (string, string, error) {
+func (u *useCase) renderPrompt(ctx context.Context, projectID string, kind string, promptData map[string]string) (string, string, error) {
 	if u.promptStore == nil {
 		return "", "", fmt.Errorf("prompt store is not configured")
 	}
@@ -276,6 +279,24 @@ func (u *useCase) renderPrompt(kind string, promptData map[string]string) (strin
 	if !ok {
 		return "", "", fmt.Errorf("unsupported generation kind %q", kind)
 	}
+
+	// 优先查项目覆盖
+	if u.promptOverrides != nil {
+		override, err := u.promptOverrides.GetByProjectAndCapability(ctx, projectID, string(promptCapability))
+		if err == nil && override != nil {
+			tmpl, parseErr := prompts.ParseTemplate(string(promptCapability), override.System, override.User)
+			if parseErr != nil {
+				return "", "", fmt.Errorf("invalid project prompt override: %w", parseErr)
+			}
+			systemPrompt, userPrompt, renderErr := tmpl.Render(promptData)
+			if renderErr != nil {
+				return "", "", fmt.Errorf("render project prompt override %q: %w", promptCapability, renderErr)
+			}
+			return systemPrompt, userPrompt, nil
+		}
+	}
+
+	// fallback 到全局默认
 	template, ok := u.promptStore.Get(promptCapability)
 	if !ok {
 		return "", "", fmt.Errorf("prompt template %q not found", promptCapability)
@@ -502,4 +523,109 @@ func validateAssetProjectID(projectID string) error {
 		return appservice.WrapInvalidInput(fmt.Errorf("project_id must be a valid UUID"))
 	}
 	return nil
+}
+
+func (u *useCase) streamAssetContent(ctx context.Context, systemPrompt, userPrompt string) (*schema.StreamReader[*schema.Message], error) {
+	if u.llmClient == nil || u.llmClient.ChatModel() == nil {
+		return nil, fmt.Errorf("llm client is not configured")
+	}
+
+	stream, err := u.llmClient.ChatModel().Stream(ctx, []*schema.Message{
+		{Role: schema.System, Content: systemPrompt},
+		{Role: schema.User, Content: userPrompt},
+	})
+	if err != nil {
+		return nil, fmt.Errorf("stream asset content: %w", err)
+	}
+	return stream, nil
+}
+
+func (u *useCase) GenerateStream(ctx context.Context, params GenerateParams) (*GenerateStreamResult, error) {
+	startedAt := time.Now().UTC()
+	params.ProjectID = strings.TrimSpace(params.ProjectID)
+	params.Type = strings.TrimSpace(params.Type)
+	params.Instruction = strings.TrimSpace(params.Instruction)
+
+	if err := validateAssetProjectID(params.ProjectID); err != nil {
+		return nil, err
+	}
+	if !assetdomain.IsValidType(params.Type) {
+		return nil, appservice.WrapInvalidInput(fmt.Errorf("type must be one of worldbuilding, character, outline"))
+	}
+	if params.Instruction == "" {
+		return nil, appservice.WrapInvalidInput(fmt.Errorf("instruction must not be empty"))
+	}
+
+	projectEntity, err := u.projects.GetByID(ctx, params.ProjectID)
+	if err != nil {
+		return nil, appservice.TranslateStorageError(err)
+	}
+
+	systemPrompt, userPrompt, err := u.renderPrompt(ctx, params.ProjectID, generationdomain.KindAssetGeneration, map[string]string{
+		"ProjectTitle":   projectEntity.Title,
+		"ProjectSummary": projectEntity.Summary,
+		"AssetType":      params.Type,
+		"Instruction":    params.Instruction,
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	recordID := uuid.NewString()
+	record := newGenerationRecord(recordID, params.ProjectID, generationdomain.KindAssetGeneration, buildPromptSnapshot(systemPrompt, userPrompt), startedAt)
+	if err := u.generationRecords.Create(ctx, record); err != nil {
+		return nil, appservice.TranslateStorageError(err)
+	}
+
+	stream, err := u.streamAssetContent(ctx, systemPrompt, userPrompt)
+	if err != nil {
+		_ = u.failGeneration(ctx, record, "", startedAt, params.Type, err)
+		return nil, err
+	}
+
+	return &GenerateStreamResult{
+		Record: record,
+		Stream: stream,
+		OnComplete: func(rawOutput string) (*GenerateResult, error) {
+			rawOutput = strings.TrimSpace(rawOutput)
+			if rawOutput == "" {
+				err := fmt.Errorf("llm response content must not be empty")
+				_ = u.failGeneration(ctx, record, "", startedAt, params.Type, err)
+				return nil, err
+			}
+
+			parsed, parseErr := parseGeneratedAsset(rawOutput)
+			if parseErr != nil {
+				_ = u.failGeneration(ctx, record, rawOutput, startedAt, params.Type, appservice.WrapInvalidInput(parseErr))
+				return nil, appservice.WrapInvalidInput(parseErr)
+			}
+
+			now := time.Now().UTC()
+			entity := &assetdomain.Asset{
+				ID:        uuid.NewString(),
+				ProjectID: params.ProjectID,
+				Type:      params.Type,
+				Title:     strings.TrimSpace(parsed.Title),
+				Content:   strings.TrimSpace(parsed.Content),
+				CreatedAt: now,
+				UpdatedAt: now,
+			}
+			if err := entity.Validate(); err != nil {
+				_ = u.failGeneration(ctx, record, rawOutput, startedAt, params.Type, appservice.WrapInvalidInput(err))
+				return nil, appservice.WrapInvalidInput(err)
+			}
+			if err := u.assets.Create(ctx, entity); err != nil {
+				translatedErr := appservice.TranslateStorageError(err)
+				_ = u.failGeneration(ctx, record, rawOutput, startedAt, params.Type, translatedErr)
+				return nil, translatedErr
+			}
+			if err := u.succeedGeneration(ctx, record, entity.ID, startedAt, params.Type); err != nil {
+				return nil, err
+			}
+			return &GenerateResult{Asset: entity, GenerationRecord: record}, nil
+		},
+		OnError: func(err error) {
+			_ = u.failGeneration(ctx, record, "", startedAt, params.Type, err)
+		},
+	}, nil
 }

@@ -14,6 +14,7 @@ import (
 	generationdomain "novelforge/backend/internal/domain/generation"
 	metricdomain "novelforge/backend/internal/domain/metric"
 	projectdomain "novelforge/backend/internal/domain/project"
+	promptdomain "novelforge/backend/internal/domain/prompt"
 	"novelforge/backend/internal/infra/llm"
 	"novelforge/backend/internal/infra/llm/prompts"
 	appservice "novelforge/backend/internal/service"
@@ -30,6 +31,7 @@ type useCase struct {
 	generationRecords generationdomain.GenerationRecordRepository
 	llmClient         llm.Client
 	promptStore       *prompts.Store
+	promptOverrides   promptdomain.OverrideRepository
 	metrics           metricservice.UseCase
 }
 
@@ -42,6 +44,7 @@ func NewUseCase(deps Dependencies) UseCase {
 		generationRecords: deps.GenerationRecords,
 		llmClient:         deps.LLMClient,
 		promptStore:       deps.PromptStore,
+		promptOverrides:   deps.PromptOverrides,
 		metrics:           deps.Metrics,
 	}
 }
@@ -186,7 +189,7 @@ func (u *useCase) Generate(ctx context.Context, params GenerateParams) (*Generat
 		return nil, err
 	}
 
-	systemPrompt, userPrompt, err := u.renderPrompt(generationdomain.KindChapterGeneration, buildGeneratePromptData(projectEntity, promptContext, params))
+	systemPrompt, userPrompt, err := u.renderPrompt(ctx, params.ProjectID, generationdomain.KindChapterGeneration, buildGeneratePromptData(projectEntity, promptContext, params))
 	if err != nil {
 		u.trackOperationFailed(ctx, params.ProjectID, "", "generate", generationdomain.KindChapterGeneration, startedAt, 0, err)
 		return nil, err
@@ -261,7 +264,7 @@ func (u *useCase) Continue(ctx context.Context, params ContinueParams) (*Continu
 		return nil, err
 	}
 
-	systemPrompt, userPrompt, err := u.renderPrompt(generationdomain.KindChapterContinuation, buildContinuePromptData(projectEntity, promptContext, chapterEntity, params))
+	systemPrompt, userPrompt, err := u.renderPrompt(ctx, chapterEntity.ProjectID, generationdomain.KindChapterContinuation, buildContinuePromptData(projectEntity, promptContext, chapterEntity, params))
 	if err != nil {
 		u.trackOperationFailed(ctx, chapterEntity.ProjectID, chapterEntity.ID, "continue", generationdomain.KindChapterContinuation, startedAt, 0, err)
 		return nil, err
@@ -344,7 +347,7 @@ func (u *useCase) Rewrite(ctx context.Context, params RewriteParams) (*RewriteRe
 		return nil, err
 	}
 
-	systemPrompt, userPrompt, err := u.renderPrompt(generationdomain.KindChapterRewrite, buildRewritePromptData(projectEntity, promptContext, chapterEntity, params))
+	systemPrompt, userPrompt, err := u.renderPrompt(ctx, chapterEntity.ProjectID, generationdomain.KindChapterRewrite, buildRewritePromptData(projectEntity, promptContext, chapterEntity, params))
 	if err != nil {
 		u.trackOperationFailed(ctx, chapterEntity.ProjectID, chapterEntity.ID, "rewrite", generationdomain.KindChapterRewrite, startedAt, 0, err)
 		return nil, err
@@ -586,7 +589,7 @@ func buildRewritePromptData(projectEntity *projectdomain.Project, promptContext 
 	}
 }
 
-func (u *useCase) renderPrompt(kind string, promptData map[string]string) (string, string, error) {
+func (u *useCase) renderPrompt(ctx context.Context, projectID string, kind string, promptData map[string]string) (string, string, error) {
 	if u.promptStore == nil {
 		return "", "", fmt.Errorf("prompt store is not configured")
 	}
@@ -594,6 +597,24 @@ func (u *useCase) renderPrompt(kind string, promptData map[string]string) (strin
 	if !ok {
 		return "", "", fmt.Errorf("unsupported generation kind %q", kind)
 	}
+
+	// 优先查项目覆盖
+	if u.promptOverrides != nil {
+		override, err := u.promptOverrides.GetByProjectAndCapability(ctx, projectID, string(promptCapability))
+		if err == nil && override != nil {
+			tmpl, parseErr := prompts.ParseTemplate(string(promptCapability), override.System, override.User)
+			if parseErr != nil {
+				return "", "", fmt.Errorf("invalid project prompt override: %w", parseErr)
+			}
+			systemPrompt, userPrompt, renderErr := tmpl.Render(promptData)
+			if renderErr != nil {
+				return "", "", fmt.Errorf("render project prompt override %q: %w", promptCapability, renderErr)
+			}
+			return systemPrompt, userPrompt, nil
+		}
+	}
+
+	// fallback 到全局默认
 	template, ok := u.promptStore.Get(promptCapability)
 	if !ok {
 		return "", "", fmt.Errorf("prompt template %q not found", promptCapability)
@@ -813,4 +834,283 @@ func validateConfirmedBy(confirmedBy string) error {
 		return appservice.WrapInvalidInput(fmt.Errorf("confirmed_by must be a valid UUID"))
 	}
 	return nil
+}
+
+func (u *useCase) streamContent(ctx context.Context, systemPrompt, userPrompt string) (*schema.StreamReader[*schema.Message], error) {
+	if u.llmClient == nil || u.llmClient.ChatModel() == nil {
+		return nil, fmt.Errorf("llm client is not configured")
+	}
+
+	stream, err := u.llmClient.ChatModel().Stream(ctx, []*schema.Message{
+		{Role: schema.System, Content: systemPrompt},
+		{Role: schema.User, Content: userPrompt},
+	})
+	if err != nil {
+		return nil, fmt.Errorf("stream chapter content: %w", err)
+	}
+	return stream, nil
+}
+
+func (u *useCase) GenerateStream(ctx context.Context, params GenerateParams) (*GenerateStreamResult, error) {
+	startedAt := time.Now().UTC()
+	params.ProjectID = strings.TrimSpace(params.ProjectID)
+	params.Title = strings.TrimSpace(params.Title)
+	params.Instruction = strings.TrimSpace(params.Instruction)
+
+	if err := validateChapterProjectID(params.ProjectID); err != nil {
+		return nil, err
+	}
+	if params.Title == "" {
+		return nil, appservice.WrapInvalidInput(fmt.Errorf("title must not be empty"))
+	}
+	if params.Ordinal <= 0 {
+		return nil, appservice.WrapInvalidInput(fmt.Errorf("ordinal must be greater than 0"))
+	}
+	if params.Instruction == "" {
+		return nil, appservice.WrapInvalidInput(fmt.Errorf("instruction must not be empty"))
+	}
+
+	projectEntity, promptContext, err := u.loadProjectAndPromptContext(ctx, params.ProjectID)
+	if err != nil {
+		return nil, err
+	}
+	if err := u.ensureOrdinalAvailable(ctx, params.ProjectID, params.Ordinal, ""); err != nil {
+		return nil, err
+	}
+
+	systemPrompt, userPrompt, err := u.renderPrompt(ctx, params.ProjectID, generationdomain.KindChapterGeneration, buildGeneratePromptData(projectEntity, promptContext, params))
+	if err != nil {
+		return nil, err
+	}
+
+	chapterID := uuid.NewString()
+	recordID := uuid.NewString()
+	record := newGenerationRecord(recordID, params.ProjectID, chapterID, generationdomain.KindChapterGeneration, buildPromptSnapshot(systemPrompt, userPrompt), startedAt)
+	if err := u.generationRecords.Create(ctx, record); err != nil {
+		return nil, appservice.TranslateStorageError(err)
+	}
+
+	stream, err := u.streamContent(ctx, systemPrompt, userPrompt)
+	if err != nil {
+		_ = u.failGeneration(ctx, record, "", startedAt, err)
+		return nil, err
+	}
+
+	return &GenerateStreamResult{
+		ChapterID: chapterID,
+		RecordID:  recordID,
+		Record:    record,
+		Stream:    stream,
+		OnComplete: func(content string) (*GenerateResult, error) {
+			content = strings.TrimSpace(content)
+			if content == "" {
+				err := fmt.Errorf("llm response content must not be empty")
+				_ = u.failGeneration(ctx, record, "", startedAt, err)
+				return nil, err
+			}
+
+			now := time.Now().UTC()
+			chapterEntity := &chapterdomain.Chapter{
+				ID:             chapterID,
+				ProjectID:      params.ProjectID,
+				Title:          params.Title,
+				Ordinal:        params.Ordinal,
+				Status:         chapterdomain.StatusDraft,
+				Content:        content,
+				CurrentDraftID: recordID,
+				CreatedAt:      now,
+				UpdatedAt:      now,
+			}
+			if err := chapterEntity.Validate(); err != nil {
+				_ = u.failGeneration(ctx, record, content, startedAt, appservice.WrapInvalidInput(err))
+				return nil, appservice.WrapInvalidInput(err)
+			}
+			if err := u.chapters.Create(ctx, chapterEntity); err != nil {
+				translatedErr := appservice.TranslateStorageError(err)
+				_ = u.failGeneration(ctx, record, content, startedAt, translatedErr)
+				return nil, translatedErr
+			}
+			if err := u.succeedGeneration(ctx, record, content, startedAt); err != nil {
+				return nil, err
+			}
+			return &GenerateResult{Chapter: chapterEntity, GenerationRecord: record}, nil
+		},
+		OnError: func(err error) {
+			_ = u.failGeneration(ctx, record, "", startedAt, err)
+		},
+	}, nil
+}
+
+func (u *useCase) ContinueStream(ctx context.Context, params ContinueParams) (*ContinueStreamResult, error) {
+	startedAt := time.Now().UTC()
+	params.ChapterID = strings.TrimSpace(params.ChapterID)
+	params.Instruction = strings.TrimSpace(params.Instruction)
+
+	if err := validateChapterID(params.ChapterID); err != nil {
+		return nil, err
+	}
+	if params.Instruction == "" {
+		return nil, appservice.WrapInvalidInput(fmt.Errorf("instruction must not be empty"))
+	}
+
+	chapterEntity, err := u.chapters.GetByID(ctx, params.ChapterID)
+	if err != nil {
+		return nil, appservice.TranslateStorageError(err)
+	}
+	expectedUpdatedAt := chapterEntity.UpdatedAt
+	projectEntity, promptContext, err := u.loadProjectAndPromptContext(ctx, chapterEntity.ProjectID)
+	if err != nil {
+		return nil, err
+	}
+
+	systemPrompt, userPrompt, err := u.renderPrompt(ctx, chapterEntity.ProjectID, generationdomain.KindChapterContinuation, buildContinuePromptData(projectEntity, promptContext, chapterEntity, params))
+	if err != nil {
+		return nil, err
+	}
+
+	recordID := uuid.NewString()
+	record := newGenerationRecord(recordID, chapterEntity.ProjectID, chapterEntity.ID, generationdomain.KindChapterContinuation, buildPromptSnapshot(systemPrompt, userPrompt), startedAt)
+	if err := u.generationRecords.Create(ctx, record); err != nil {
+		return nil, appservice.TranslateStorageError(err)
+	}
+
+	stream, err := u.streamContent(ctx, systemPrompt, userPrompt)
+	if err != nil {
+		_ = u.failGeneration(ctx, record, "", startedAt, err)
+		return nil, err
+	}
+
+	return &ContinueStreamResult{
+		Record: record,
+		Stream: stream,
+		OnComplete: func(content string) (*ContinueResult, error) {
+			content = strings.TrimSpace(content)
+			if content == "" {
+				err := fmt.Errorf("llm response content must not be empty")
+				_ = u.failGeneration(ctx, record, "", startedAt, err)
+				return nil, err
+			}
+
+			updated := *chapterEntity
+			updated.Status = chapterdomain.StatusDraft
+			updated.Content = content
+			updated.CurrentDraftID = recordID
+			updated.CurrentDraftConfirmedAt = nil
+			updated.CurrentDraftConfirmedBy = ""
+			updated.UpdatedAt = time.Now().UTC()
+			if err := updated.Validate(); err != nil {
+				_ = u.failGeneration(ctx, record, content, startedAt, appservice.WrapInvalidInput(err))
+				return nil, appservice.WrapInvalidInput(err)
+			}
+			updatedOK, err := u.chapters.UpdateIfUnchanged(ctx, &updated, expectedUpdatedAt)
+			if err != nil {
+				translatedErr := appservice.TranslateStorageError(err)
+				_ = u.failGeneration(ctx, record, content, startedAt, translatedErr)
+				return nil, translatedErr
+			}
+			if !updatedOK {
+				conflictErr := appservice.WrapConflict(fmt.Errorf("chapter was modified during continuation; please retry"))
+				_ = u.failGeneration(ctx, record, content, startedAt, conflictErr)
+				return nil, conflictErr
+			}
+			if err := u.succeedGeneration(ctx, record, content, startedAt); err != nil {
+				return nil, err
+			}
+			return &ContinueResult{Chapter: &updated, GenerationRecord: record}, nil
+		},
+		OnError: func(err error) {
+			_ = u.failGeneration(ctx, record, "", startedAt, err)
+		},
+	}, nil
+}
+
+func (u *useCase) RewriteStream(ctx context.Context, params RewriteParams) (*RewriteStreamResult, error) {
+	startedAt := time.Now().UTC()
+	params.ChapterID = strings.TrimSpace(params.ChapterID)
+	params.Instruction = strings.TrimSpace(params.Instruction)
+	trimmedTargetText := strings.TrimSpace(params.TargetText)
+
+	if err := validateChapterID(params.ChapterID); err != nil {
+		return nil, err
+	}
+	if params.Instruction == "" {
+		return nil, appservice.WrapInvalidInput(fmt.Errorf("instruction must not be empty"))
+	}
+	if trimmedTargetText == "" {
+		return nil, appservice.WrapInvalidInput(fmt.Errorf("target_text must not be empty"))
+	}
+
+	chapterEntity, err := u.chapters.GetByID(ctx, params.ChapterID)
+	if err != nil {
+		return nil, appservice.TranslateStorageError(err)
+	}
+	expectedUpdatedAt := chapterEntity.UpdatedAt
+	if !strings.Contains(chapterEntity.Content, trimmedTargetText) {
+		return nil, appservice.WrapInvalidInput(fmt.Errorf("target_text must exactly match existing chapter content"))
+	}
+
+	projectEntity, promptContext, err := u.loadProjectAndPromptContext(ctx, chapterEntity.ProjectID)
+	if err != nil {
+		return nil, err
+	}
+
+	systemPrompt, userPrompt, err := u.renderPrompt(ctx, chapterEntity.ProjectID, generationdomain.KindChapterRewrite, buildRewritePromptData(projectEntity, promptContext, chapterEntity, params))
+	if err != nil {
+		return nil, err
+	}
+
+	recordID := uuid.NewString()
+	record := newGenerationRecord(recordID, chapterEntity.ProjectID, chapterEntity.ID, generationdomain.KindChapterRewrite, buildPromptSnapshot(systemPrompt, userPrompt), startedAt)
+	if err := u.generationRecords.Create(ctx, record); err != nil {
+		return nil, appservice.TranslateStorageError(err)
+	}
+
+	stream, err := u.streamContent(ctx, systemPrompt, userPrompt)
+	if err != nil {
+		_ = u.failGeneration(ctx, record, "", startedAt, err)
+		return nil, err
+	}
+
+	return &RewriteStreamResult{
+		Record: record,
+		Stream: stream,
+		OnComplete: func(content string) (*RewriteResult, error) {
+			content = strings.TrimSpace(content)
+			if content == "" {
+				err := fmt.Errorf("llm response content must not be empty")
+				_ = u.failGeneration(ctx, record, "", startedAt, err)
+				return nil, err
+			}
+
+			updated := *chapterEntity
+			updated.Status = chapterdomain.StatusDraft
+			updated.Content = content
+			updated.CurrentDraftID = recordID
+			updated.CurrentDraftConfirmedAt = nil
+			updated.CurrentDraftConfirmedBy = ""
+			updated.UpdatedAt = time.Now().UTC()
+			if err := updated.Validate(); err != nil {
+				_ = u.failGeneration(ctx, record, content, startedAt, appservice.WrapInvalidInput(err))
+				return nil, appservice.WrapInvalidInput(err)
+			}
+			updatedOK, err := u.chapters.UpdateIfUnchanged(ctx, &updated, expectedUpdatedAt)
+			if err != nil {
+				translatedErr := appservice.TranslateStorageError(err)
+				_ = u.failGeneration(ctx, record, content, startedAt, translatedErr)
+				return nil, translatedErr
+			}
+			if !updatedOK {
+				conflictErr := appservice.WrapConflict(fmt.Errorf("chapter was modified during rewrite; please retry"))
+				_ = u.failGeneration(ctx, record, content, startedAt, conflictErr)
+				return nil, conflictErr
+			}
+			if err := u.succeedGeneration(ctx, record, content, startedAt); err != nil {
+				return nil, err
+			}
+			return &RewriteResult{Chapter: &updated, GenerationRecord: record}, nil
+		},
+		OnError: func(err error) {
+			_ = u.failGeneration(ctx, record, "", startedAt, err)
+		},
+	}, nil
 }

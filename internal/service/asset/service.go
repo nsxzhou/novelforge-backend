@@ -6,9 +6,12 @@ import (
 	assetdomain "novelforge/backend/internal/domain/asset"
 	generationdomain "novelforge/backend/internal/domain/generation"
 	projectdomain "novelforge/backend/internal/domain/project"
+	promptdomain "novelforge/backend/internal/domain/prompt"
 	"novelforge/backend/internal/infra/llm"
 	"novelforge/backend/internal/infra/llm/prompts"
 	metricservice "novelforge/backend/internal/service/metric"
+
+	"github.com/cloudwego/eino/schema"
 )
 
 // Dependencies 声明资产(asset)用例所需的领域依赖项。
@@ -18,6 +21,7 @@ type Dependencies struct {
 	GenerationRecords generationdomain.GenerationRecordRepository
 	LLMClient         llm.Client
 	PromptStore       *prompts.Store
+	PromptOverrides   promptdomain.OverrideRepository
 	Metrics           metricservice.UseCase
 }
 
@@ -34,6 +38,14 @@ type GenerateResult struct {
 	GenerationRecord *generationdomain.GenerationRecord
 }
 
+// GenerateStreamResult 定义资产流式生成结果。
+type GenerateStreamResult struct {
+	Record     *generationdomain.GenerationRecord
+	Stream     *schema.StreamReader[*schema.Message]
+	OnComplete func(content string) (*GenerateResult, error)
+	OnError    func(err error)
+}
+
 // UseCase 定义资产(asset)的应用边界。
 type UseCase interface {
 	Create(ctx context.Context, asset *assetdomain.Asset) error
@@ -43,4 +55,5 @@ type UseCase interface {
 	Update(ctx context.Context, asset *assetdomain.Asset) error
 	Delete(ctx context.Context, id string) error
 	Generate(ctx context.Context, params GenerateParams) (*GenerateResult, error)
+	GenerateStream(ctx context.Context, params GenerateParams) (*GenerateStreamResult, error)
 }

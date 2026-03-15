@@ -14,35 +14,39 @@ import (
 	conversationdomain "novelforge/backend/internal/domain/conversation"
 	metricdomain "novelforge/backend/internal/domain/metric"
 	projectdomain "novelforge/backend/internal/domain/project"
+	promptdomain "novelforge/backend/internal/domain/prompt"
 	"novelforge/backend/internal/infra/llm"
 	"novelforge/backend/internal/infra/llm/prompts"
 	appservice "novelforge/backend/internal/service"
 	metricservice "novelforge/backend/internal/service/metric"
+	"novelforge/backend/pkg/config"
 
 	"github.com/cloudwego/eino/schema"
 	"github.com/google/uuid"
 )
 
 type useCase struct {
-	conversations conversationdomain.ConversationRepository
-	projects      projectdomain.ProjectRepository
-	assets        assetdomain.AssetRepository
-	llmClient     llm.Client
-	promptStore   *prompts.Store
-	metrics       metricservice.UseCase
-	txRunner      TxRunner
+	conversations   conversationdomain.ConversationRepository
+	projects        projectdomain.ProjectRepository
+	assets          assetdomain.AssetRepository
+	llmClient       llm.Client
+	promptStore     *prompts.Store
+	promptOverrides promptdomain.OverrideRepository
+	metrics         metricservice.UseCase
+	txRunner        TxRunner
 }
 
 // NewUseCase 创建对话(conversation)细化用例实现。
 func NewUseCase(deps Dependencies) UseCase {
 	return &useCase{
-		conversations: deps.Conversations,
-		projects:      deps.Projects,
-		assets:        deps.Assets,
-		llmClient:     deps.LLMClient,
-		promptStore:   deps.PromptStore,
-		metrics:       deps.Metrics,
-		txRunner:      deps.TxRunner,
+		conversations:   deps.Conversations,
+		projects:        deps.Projects,
+		assets:          deps.Assets,
+		llmClient:       deps.LLMClient,
+		promptStore:     deps.PromptStore,
+		promptOverrides: deps.PromptOverrides,
+		metrics:         deps.Metrics,
+		txRunner:        deps.TxRunner,
 	}
 }
 
@@ -362,15 +366,14 @@ func (u *useCase) generateSuggestion(ctx context.Context, conversation *conversa
 	if !ok {
 		return nil, conversationdomain.Message{}, appservice.WrapInvalidInput(fmt.Errorf("target_type must be one of project, asset"))
 	}
-	template, ok := u.promptStore.Get(promptCapability)
-	if !ok {
-		return nil, conversationdomain.Message{}, fmt.Errorf("prompt template %q not found", promptCapability)
+
+	promptData := buildPromptData(conversation, target, latestUserMessage)
+
+	systemPrompt, userPrompt, err := u.renderConversationPrompt(ctx, conversation.ProjectID, promptCapability, promptData)
+	if err != nil {
+		return nil, conversationdomain.Message{}, err
 	}
 
-	systemPrompt, userPrompt, err := template.Render(buildPromptData(conversation, target, latestUserMessage))
-	if err != nil {
-		return nil, conversationdomain.Message{}, fmt.Errorf("render prompt template %q: %w", promptCapability, err)
-	}
 	if u.llmClient == nil || u.llmClient.ChatModel() == nil {
 		return nil, conversationdomain.Message{}, fmt.Errorf("llm client is not configured")
 	}
@@ -396,6 +399,35 @@ func (u *useCase) generateSuggestion(ctx context.Context, conversation *conversa
 
 	assistantMessage := newConversationMessage(conversationdomain.MessageRoleAssistant, response.Content, time.Now().UTC())
 	return suggestion, assistantMessage, nil
+}
+
+func (u *useCase) renderConversationPrompt(ctx context.Context, projectID string, promptCapability config.PromptCapability, promptData map[string]string) (string, string, error) {
+	// 优先查项目覆盖
+	if u.promptOverrides != nil {
+		override, err := u.promptOverrides.GetByProjectAndCapability(ctx, projectID, string(promptCapability))
+		if err == nil && override != nil {
+			tmpl, parseErr := prompts.ParseTemplate(string(promptCapability), override.System, override.User)
+			if parseErr != nil {
+				return "", "", fmt.Errorf("invalid project prompt override: %w", parseErr)
+			}
+			systemPrompt, userPrompt, renderErr := tmpl.Render(promptData)
+			if renderErr != nil {
+				return "", "", fmt.Errorf("render project prompt override %q: %w", promptCapability, renderErr)
+			}
+			return systemPrompt, userPrompt, nil
+		}
+	}
+
+	// fallback 到全局默认
+	template, ok := u.promptStore.Get(promptCapability)
+	if !ok {
+		return "", "", fmt.Errorf("prompt template %q not found", promptCapability)
+	}
+	systemPrompt, userPrompt, err := template.Render(promptData)
+	if err != nil {
+		return "", "", fmt.Errorf("render prompt template %q: %w", promptCapability, err)
+	}
+	return systemPrompt, userPrompt, nil
 }
 
 func (u *useCase) loadTarget(ctx context.Context, projectID, targetType, targetID string) (any, error) {
@@ -667,4 +699,184 @@ func validateTarget(targetType, targetID string) error {
 		return appservice.WrapInvalidInput(fmt.Errorf("target_id must be a valid UUID"))
 	}
 	return nil
+}
+
+func (u *useCase) streamLLMContent(ctx context.Context, systemPrompt, userPrompt string) (*schema.StreamReader[*schema.Message], error) {
+	if u.llmClient == nil || u.llmClient.ChatModel() == nil {
+		return nil, fmt.Errorf("llm client is not configured")
+	}
+
+	stream, err := u.llmClient.ChatModel().Stream(ctx, []*schema.Message{
+		{Role: schema.System, Content: systemPrompt},
+		{Role: schema.User, Content: userPrompt},
+	})
+	if err != nil {
+		return nil, fmt.Errorf("stream refinement suggestion: %w", err)
+	}
+	return stream, nil
+}
+
+func (u *useCase) StartStream(ctx context.Context, params StartParams) (*StartStreamResult, error) {
+	params.ProjectID = strings.TrimSpace(params.ProjectID)
+	params.TargetType = strings.TrimSpace(params.TargetType)
+	params.TargetID = strings.TrimSpace(params.TargetID)
+	params.Message = strings.TrimSpace(params.Message)
+
+	if err := validateProjectID(params.ProjectID); err != nil {
+		return nil, err
+	}
+	if err := validateTarget(params.TargetType, params.TargetID); err != nil {
+		return nil, err
+	}
+	if params.Message == "" {
+		return nil, appservice.WrapInvalidInput(fmt.Errorf("message must not be empty"))
+	}
+
+	target, err := u.loadTarget(ctx, params.ProjectID, params.TargetType, params.TargetID)
+	if err != nil {
+		return nil, err
+	}
+
+	promptCapability, ok := appservice.PromptCapabilityForConversationTarget(params.TargetType)
+	if !ok {
+		return nil, appservice.WrapInvalidInput(fmt.Errorf("target_type must be one of project, asset"))
+	}
+
+	now := time.Now().UTC()
+	conversation := &conversationdomain.Conversation{
+		ID:         uuid.NewString(),
+		ProjectID:  params.ProjectID,
+		TargetType: params.TargetType,
+		TargetID:   params.TargetID,
+		CreatedAt:  now,
+		UpdatedAt:  now,
+	}
+
+	userMessage := newConversationMessage(conversationdomain.MessageRoleUser, params.Message, now)
+	if err := conversation.AppendMessage(userMessage); err != nil {
+		return nil, appservice.WrapInvalidInput(err)
+	}
+
+	promptData := buildPromptData(conversation, target, params.Message)
+	systemPrompt, userPrompt, err := u.renderConversationPrompt(ctx, params.ProjectID, promptCapability, promptData)
+	if err != nil {
+		return nil, err
+	}
+
+	stream, err := u.streamLLMContent(ctx, systemPrompt, userPrompt)
+	if err != nil {
+		return nil, err
+	}
+
+	return &StartStreamResult{
+		Conversation: conversation,
+		Stream:       stream,
+		OnComplete: func(content string) (*conversationdomain.Conversation, error) {
+			content = strings.TrimSpace(content)
+			if content == "" {
+				return nil, fmt.Errorf("llm response content must not be empty")
+			}
+
+			suggestion, err := parseSuggestion(content, conversation.TargetType)
+			if err != nil {
+				return nil, appservice.WrapInvalidInput(err)
+			}
+			if err := validateSuggestionAgainstTarget(suggestion, conversation.TargetType, target); err != nil {
+				return nil, err
+			}
+
+			assistantMessage := newConversationMessage(conversationdomain.MessageRoleAssistant, content, time.Now().UTC())
+			if err := conversation.AppendMessage(assistantMessage); err != nil {
+				return nil, appservice.WrapInvalidInput(err)
+			}
+			if err := conversation.ReplacePendingSuggestion(*suggestion, assistantMessage.CreatedAt); err != nil {
+				return nil, appservice.WrapInvalidInput(err)
+			}
+			if err := u.conversations.Create(ctx, conversation); err != nil {
+				return nil, appservice.TranslateStorageError(err)
+			}
+			return conversation, nil
+		},
+		OnError: func(err error) {
+			// Nothing to clean up for Start since conversation hasn't been persisted yet.
+		},
+	}, nil
+}
+
+func (u *useCase) ReplyStream(ctx context.Context, params ReplyParams) (*ReplyStreamResult, error) {
+	params.ConversationID = strings.TrimSpace(params.ConversationID)
+	params.Message = strings.TrimSpace(params.Message)
+
+	if err := validateConversationID(params.ConversationID); err != nil {
+		return nil, err
+	}
+	if params.Message == "" {
+		return nil, appservice.WrapInvalidInput(fmt.Errorf("message must not be empty"))
+	}
+
+	conversation, err := u.conversations.GetByID(ctx, params.ConversationID)
+	if err != nil {
+		return nil, appservice.TranslateStorageError(err)
+	}
+
+	target, err := u.loadTarget(ctx, conversation.ProjectID, conversation.TargetType, conversation.TargetID)
+	if err != nil {
+		return nil, err
+	}
+
+	promptCapability, ok := appservice.PromptCapabilityForConversationTarget(conversation.TargetType)
+	if !ok {
+		return nil, appservice.WrapInvalidInput(fmt.Errorf("target_type must be one of project, asset"))
+	}
+
+	now := time.Now().UTC()
+	userMessage := newConversationMessage(conversationdomain.MessageRoleUser, params.Message, now)
+	if err := conversation.AppendMessage(userMessage); err != nil {
+		return nil, appservice.WrapInvalidInput(err)
+	}
+
+	promptData := buildPromptData(conversation, target, params.Message)
+	systemPrompt, userPrompt, err := u.renderConversationPrompt(ctx, conversation.ProjectID, promptCapability, promptData)
+	if err != nil {
+		return nil, err
+	}
+
+	stream, err := u.streamLLMContent(ctx, systemPrompt, userPrompt)
+	if err != nil {
+		return nil, err
+	}
+
+	return &ReplyStreamResult{
+		Conversation: conversation,
+		Stream:       stream,
+		OnComplete: func(content string) (*conversationdomain.Conversation, error) {
+			content = strings.TrimSpace(content)
+			if content == "" {
+				return nil, fmt.Errorf("llm response content must not be empty")
+			}
+
+			suggestion, err := parseSuggestion(content, conversation.TargetType)
+			if err != nil {
+				return nil, appservice.WrapInvalidInput(err)
+			}
+			if err := validateSuggestionAgainstTarget(suggestion, conversation.TargetType, target); err != nil {
+				return nil, err
+			}
+
+			assistantMessage := newConversationMessage(conversationdomain.MessageRoleAssistant, content, time.Now().UTC())
+			if err := conversation.AppendMessage(assistantMessage); err != nil {
+				return nil, appservice.WrapInvalidInput(err)
+			}
+			if err := conversation.ReplacePendingSuggestion(*suggestion, assistantMessage.CreatedAt); err != nil {
+				return nil, appservice.WrapInvalidInput(err)
+			}
+			if err := u.conversations.Update(ctx, conversation); err != nil {
+				return nil, appservice.TranslateStorageError(err)
+			}
+			return conversation, nil
+		},
+		OnError: func(err error) {
+			// Nothing to clean up for Reply since conversation was already persisted.
+		},
+	}, nil
 }

@@ -6,9 +6,12 @@ import (
 	assetdomain "novelforge/backend/internal/domain/asset"
 	conversationdomain "novelforge/backend/internal/domain/conversation"
 	projectdomain "novelforge/backend/internal/domain/project"
+	promptdomain "novelforge/backend/internal/domain/prompt"
 	"novelforge/backend/internal/infra/llm"
 	"novelforge/backend/internal/infra/llm/prompts"
 	metricservice "novelforge/backend/internal/service/metric"
+
+	"github.com/cloudwego/eino/schema"
 )
 
 // TxRunner 抽象对话确认流程所需的事务边界。
@@ -18,13 +21,14 @@ type TxRunner interface {
 
 // Dependencies 声明对话(conversation)细化用例所需的依赖项。
 type Dependencies struct {
-	Conversations conversationdomain.ConversationRepository
-	Projects      projectdomain.ProjectRepository
-	Assets        assetdomain.AssetRepository
-	LLMClient     llm.Client
-	PromptStore   *prompts.Store
-	Metrics       metricservice.UseCase
-	TxRunner      TxRunner
+	Conversations   conversationdomain.ConversationRepository
+	Projects        projectdomain.ProjectRepository
+	Assets          assetdomain.AssetRepository
+	LLMClient       llm.Client
+	PromptStore     *prompts.Store
+	PromptOverrides promptdomain.OverrideRepository
+	Metrics         metricservice.UseCase
+	TxRunner        TxRunner
 }
 
 // StartParams 定义发起细化对话所需参数。
@@ -57,6 +61,22 @@ type ConfirmResult struct {
 	Asset        *assetdomain.Asset
 }
 
+// StartStreamResult 定义流式发起对话结果。
+type StartStreamResult struct {
+	Conversation *conversationdomain.Conversation
+	Stream       *schema.StreamReader[*schema.Message]
+	OnComplete   func(content string) (*conversationdomain.Conversation, error)
+	OnError      func(err error)
+}
+
+// ReplyStreamResult 定义流式回复对话结果。
+type ReplyStreamResult struct {
+	Conversation *conversationdomain.Conversation
+	Stream       *schema.StreamReader[*schema.Message]
+	OnComplete   func(content string) (*conversationdomain.Conversation, error)
+	OnError      func(err error)
+}
+
 // UseCase 定义对话(conversation)细化应用边界。
 type UseCase interface {
 	Start(ctx context.Context, params StartParams) (*conversationdomain.Conversation, error)
@@ -64,4 +84,6 @@ type UseCase interface {
 	Confirm(ctx context.Context, conversationID string) (*ConfirmResult, error)
 	GetByID(ctx context.Context, id string) (*conversationdomain.Conversation, error)
 	List(ctx context.Context, params ListParams) ([]*conversationdomain.Conversation, error)
+	StartStream(ctx context.Context, params StartParams) (*StartStreamResult, error)
+	ReplyStream(ctx context.Context, params ReplyParams) (*ReplyStreamResult, error)
 }

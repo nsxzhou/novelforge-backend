@@ -7,9 +7,12 @@ import (
 	chapterdomain "novelforge/backend/internal/domain/chapter"
 	generationdomain "novelforge/backend/internal/domain/generation"
 	projectdomain "novelforge/backend/internal/domain/project"
+	promptdomain "novelforge/backend/internal/domain/prompt"
 	"novelforge/backend/internal/infra/llm"
 	"novelforge/backend/internal/infra/llm/prompts"
 	metricservice "novelforge/backend/internal/service/metric"
+
+	"github.com/cloudwego/eino/schema"
 )
 
 // Dependencies 声明章节(chapter)用例所需的领域依赖项。
@@ -20,6 +23,7 @@ type Dependencies struct {
 	GenerationRecords generationdomain.GenerationRecordRepository
 	LLMClient         llm.Client
 	PromptStore       *prompts.Store
+	PromptOverrides   promptdomain.OverrideRepository
 	Metrics           metricservice.UseCase
 }
 
@@ -68,6 +72,32 @@ type RewriteResult struct {
 	GenerationRecord *generationdomain.GenerationRecord
 }
 
+// GenerateStreamResult 定义章节流式生成结果。
+type GenerateStreamResult struct {
+	ChapterID  string
+	RecordID   string
+	Record     *generationdomain.GenerationRecord
+	Stream     *schema.StreamReader[*schema.Message]
+	OnComplete func(content string) (*GenerateResult, error)
+	OnError    func(err error)
+}
+
+// ContinueStreamResult 定义章节流式续写结果。
+type ContinueStreamResult struct {
+	Record     *generationdomain.GenerationRecord
+	Stream     *schema.StreamReader[*schema.Message]
+	OnComplete func(content string) (*ContinueResult, error)
+	OnError    func(err error)
+}
+
+// RewriteStreamResult 定义章节流式改写结果。
+type RewriteStreamResult struct {
+	Record     *generationdomain.GenerationRecord
+	Stream     *schema.StreamReader[*schema.Message]
+	OnComplete func(content string) (*RewriteResult, error)
+	OnError    func(err error)
+}
+
 // UseCase 定义章节(chapter)的应用边界。
 type UseCase interface {
 	Create(ctx context.Context, chapter *chapterdomain.Chapter) error
@@ -78,4 +108,7 @@ type UseCase interface {
 	Continue(ctx context.Context, params ContinueParams) (*ContinueResult, error)
 	Rewrite(ctx context.Context, params RewriteParams) (*RewriteResult, error)
 	Confirm(ctx context.Context, params ConfirmParams) (*chapterdomain.Chapter, error)
+	GenerateStream(ctx context.Context, params GenerateParams) (*GenerateStreamResult, error)
+	ContinueStream(ctx context.Context, params ContinueParams) (*ContinueStreamResult, error)
+	RewriteStream(ctx context.Context, params RewriteParams) (*RewriteStreamResult, error)
 }
