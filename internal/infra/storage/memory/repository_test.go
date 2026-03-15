@@ -5,12 +5,12 @@ import (
 	"testing"
 	"time"
 
-	assetdomain "novelforge/backend/internal/domain/asset"
-	chapterdomain "novelforge/backend/internal/domain/chapter"
-	conversationdomain "novelforge/backend/internal/domain/conversation"
-	generationdomain "novelforge/backend/internal/domain/generation"
-	metricdomain "novelforge/backend/internal/domain/metric"
-	projectdomain "novelforge/backend/internal/domain/project"
+	assetdomain "inkmuse/backend/internal/domain/asset"
+	chapterdomain "inkmuse/backend/internal/domain/chapter"
+	conversationdomain "inkmuse/backend/internal/domain/conversation"
+	generationdomain "inkmuse/backend/internal/domain/generation"
+	metricdomain "inkmuse/backend/internal/domain/metric"
+	projectdomain "inkmuse/backend/internal/domain/project"
 
 	"github.com/google/uuid"
 )

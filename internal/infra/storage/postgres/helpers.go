@@ -7,7 +7,7 @@ import (
 	"fmt"
 	"time"
 
-	"novelforge/backend/internal/infra/storage/shared"
+	"inkmuse/backend/internal/infra/storage/shared"
 )
 
 type sqlStateError interface {

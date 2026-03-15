@@ -18,18 +18,18 @@ if [[ ! -f "$CONFIG_FILE" ]]; then
   echo "Created $CONFIG_FILE from example template."
 fi
 
-: "${NOVELFORGE_LLM_API_KEY:=local-placeholder}"
-export NOVELFORGE_LLM_API_KEY
-: "${NOVELFORGE_LLM_PROVIDER:=openai_compatible}"
-export NOVELFORGE_LLM_PROVIDER
-: "${NOVELFORGE_LLM_MODEL:=gpt-4o-mini}"
-export NOVELFORGE_LLM_MODEL
-: "${NOVELFORGE_LLM_BASE_URL:=https://api.openai.com/v1}"
-export NOVELFORGE_LLM_BASE_URL
+: "${INKMUSE_LLM_API_KEY:=local-placeholder}"
+export INKMUSE_LLM_API_KEY
+: "${INKMUSE_LLM_PROVIDER:=openai_compatible}"
+export INKMUSE_LLM_PROVIDER
+: "${INKMUSE_LLM_MODEL:=gpt-4o-mini}"
+export INKMUSE_LLM_MODEL
+: "${INKMUSE_LLM_BASE_URL:=https://api.openai.com/v1}"
+export INKMUSE_LLM_BASE_URL
 
 if grep -q 'provider: "postgres"' "$CONFIG_FILE"; then
-  : "${NOVELFORGE_DATABASE_URL:=postgres://novelforge:novelforge@127.0.0.1:5432/novelforge?sslmode=disable}"
-  export NOVELFORGE_DATABASE_URL
+  : "${INKMUSE_DATABASE_URL:=postgres://inkmuse:inkmuse@127.0.0.1:5432/inkmuse?sslmode=disable}"
+  export INKMUSE_DATABASE_URL
   go -C "$ROOT_DIR" run ./cmd/migrate -config "$CONFIG_FILE"
 fi
 

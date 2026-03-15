@@ -1,6 +1,6 @@
 package storage
 
-import "novelforge/backend/internal/infra/storage/shared"
+import "inkmuse/backend/internal/infra/storage/shared"
 
 var (
 	// ErrNotFound 表示请求的实体不存在。

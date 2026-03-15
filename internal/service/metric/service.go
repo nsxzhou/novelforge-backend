@@ -3,7 +3,7 @@ package metric
 import (
 	"context"
 
-	metricdomain "novelforge/backend/internal/domain/metric"
+	metricdomain "inkmuse/backend/internal/domain/metric"
 )
 
 // Dependencies 声明指标(metric)用例所需的领域依赖项。

@@ -6,7 +6,7 @@ import (
 	"sync"
 	"time"
 
-	"novelforge/backend/internal/domain/conversation"
+	"inkmuse/backend/internal/domain/conversation"
 )
 
 // ConversationRepository 在内存中存储对话(conversation)。

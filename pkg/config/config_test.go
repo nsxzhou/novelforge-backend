@@ -33,10 +33,10 @@ func validAppConfig() AppConfig {
 			Provider: StorageProviderMemory,
 		},
 		LLM: LLMConfig{
-			ProviderEnv:    "NOVELFORGE_LLM_PROVIDER",
-			ModelEnv:       "NOVELFORGE_LLM_MODEL",
-			BaseURLEnv:     "NOVELFORGE_LLM_BASE_URL",
-			APIKeyEnv:      "NOVELFORGE_LLM_API_KEY",
+			ProviderEnv:    "INKMUSE_LLM_PROVIDER",
+			ModelEnv:       "INKMUSE_LLM_MODEL",
+			BaseURLEnv:     "INKMUSE_LLM_BASE_URL",
+			APIKeyEnv:      "INKMUSE_LLM_API_KEY",
 			TimeoutSeconds: 60,
 			Prompts:        validPromptConfig(),
 		},
@@ -132,12 +132,12 @@ func TestStorageConfigValidate(t *testing.T) {
 		wantErr string
 	}{
 		{name: "valid memory", cfg: StorageConfig{Provider: StorageProviderMemory}},
-		{name: "valid postgres", cfg: StorageConfig{Provider: StorageProviderPostgres, Postgres: PostgresConfig{URLEnv: "NOVELFORGE_DATABASE_URL", MaxOpenConns: 10, MaxIdleConns: 5, ConnMaxLifetimeSeconds: 300}}},
+		{name: "valid postgres", cfg: StorageConfig{Provider: StorageProviderPostgres, Postgres: PostgresConfig{URLEnv: "INKMUSE_DATABASE_URL", MaxOpenConns: 10, MaxIdleConns: 5, ConnMaxLifetimeSeconds: 300}}},
 		{name: "empty provider", cfg: StorageConfig{}, wantErr: "provider must not be empty"},
 		{name: "unsupported provider", cfg: StorageConfig{Provider: "sqlite"}, wantErr: "provider must be \"memory\" or \"postgres\""},
 		{name: "postgres missing url env", cfg: StorageConfig{Provider: StorageProviderPostgres}, wantErr: "invalid postgres config: url_env must not be empty"},
-		{name: "postgres negative max open conns", cfg: StorageConfig{Provider: StorageProviderPostgres, Postgres: PostgresConfig{URLEnv: "NOVELFORGE_DATABASE_URL", MaxOpenConns: -1}}, wantErr: "max_open_conns must be greater than or equal to 0"},
-		{name: "postgres idle larger than open", cfg: StorageConfig{Provider: StorageProviderPostgres, Postgres: PostgresConfig{URLEnv: "NOVELFORGE_DATABASE_URL", MaxOpenConns: 5, MaxIdleConns: 6}}, wantErr: "max_idle_conns must be less than or equal to max_open_conns"},
+		{name: "postgres negative max open conns", cfg: StorageConfig{Provider: StorageProviderPostgres, Postgres: PostgresConfig{URLEnv: "INKMUSE_DATABASE_URL", MaxOpenConns: -1}}, wantErr: "max_open_conns must be greater than or equal to 0"},
+		{name: "postgres idle larger than open", cfg: StorageConfig{Provider: StorageProviderPostgres, Postgres: PostgresConfig{URLEnv: "INKMUSE_DATABASE_URL", MaxOpenConns: 5, MaxIdleConns: 6}}, wantErr: "max_idle_conns must be less than or equal to max_open_conns"},
 	}
 
 	for _, tt := range tests {
@@ -246,10 +246,10 @@ func TestLLMConfigValidate(t *testing.T) {
 		{
 			name: "valid with all env vars",
 			cfg: LLMConfig{
-				ProviderEnv:    "NOVELFORGE_LLM_PROVIDER",
-				ModelEnv:       "NOVELFORGE_LLM_MODEL",
-				BaseURLEnv:     "NOVELFORGE_LLM_BASE_URL",
-				APIKeyEnv:      "NOVELFORGE_LLM_API_KEY",
+				ProviderEnv:    "INKMUSE_LLM_PROVIDER",
+				ModelEnv:       "INKMUSE_LLM_MODEL",
+				BaseURLEnv:     "INKMUSE_LLM_BASE_URL",
+				APIKeyEnv:      "INKMUSE_LLM_API_KEY",
 				TimeoutSeconds: 60,
 				Prompts:        validPromptConfig(),
 			},
@@ -324,10 +324,10 @@ server:
 storage:
   provider: "memory"
 llm:
-  provider_env: "NOVELFORGE_LLM_PROVIDER"
-  model_env: "NOVELFORGE_LLM_MODEL"
-  base_url_env: "NOVELFORGE_LLM_BASE_URL"
-  api_key_env: "NOVELFORGE_LLM_API_KEY"
+  provider_env: "INKMUSE_LLM_PROVIDER"
+  model_env: "INKMUSE_LLM_MODEL"
+  base_url_env: "INKMUSE_LLM_BASE_URL"
+  api_key_env: "INKMUSE_LLM_API_KEY"
   timeout_seconds: 60
   prompts:
     asset_generation: "asset_generation.yaml"
@@ -345,7 +345,7 @@ llm:
 		if err != nil {
 			t.Fatalf("Load() error = %v", err)
 		}
-		if cfg.Server.Host != "127.0.0.1" || cfg.Storage.Provider != StorageProviderMemory || cfg.LLM.ProviderEnv != "NOVELFORGE_LLM_PROVIDER" {
+		if cfg.Server.Host != "127.0.0.1" || cfg.Storage.Provider != StorageProviderMemory || cfg.LLM.ProviderEnv != "INKMUSE_LLM_PROVIDER" {
 			t.Fatalf("Load() cfg = %#v, want parsed app config", cfg)
 		}
 	})
@@ -388,10 +388,10 @@ server:
 storage:
   provider: "memory"
 llm:
-  provider_env: "NOVELFORGE_LLM_PROVIDER"
-  model_env: "NOVELFORGE_LLM_MODEL"
-  base_url_env: "NOVELFORGE_LLM_BASE_URL"
-  api_key_env: "NOVELFORGE_LLM_API_KEY"
+  provider_env: "INKMUSE_LLM_PROVIDER"
+  model_env: "INKMUSE_LLM_MODEL"
+  base_url_env: "INKMUSE_LLM_BASE_URL"
+  api_key_env: "INKMUSE_LLM_API_KEY"
   timeout_seconds: 60
   prompts:
     asset_generation: "asset_generation.yaml"

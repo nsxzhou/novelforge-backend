@@ -7,7 +7,7 @@ import (
 	"sync"
 	"time"
 
-	"novelforge/backend/internal/domain/llmprovider"
+	"inkmuse/backend/internal/domain/llmprovider"
 )
 
 // LLMProviderRepository stores LLM provider configurations in memory.

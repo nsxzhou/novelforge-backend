@@ -1,6 +1,6 @@
-# NovelForge 后端
+# InkMuse 后端
 
-基于 Hertz + Eino 的 NovelForge 后端服务。
+基于 Hertz + Eino 的 InkMuse 后端服务。
 
 ## 当前已具备的能力
 
@@ -125,7 +125,7 @@ V1 全部 6 个领域聚合已落地，每个聚合包含实体定义（`model.g
    cp .env.example .env
    ```
 
-   然后按需修改 `.env` 中的 `NOVELFORGE_*` 配置（尤其是 `NOVELFORGE_LLM_API_KEY`）。
+   然后按需修改 `.env` 中的 `INKMUSE_*` 配置（尤其是 `INKMUSE_LLM_API_KEY`）。
 
 4. 启动服务（`provider=postgres` 时会自动执行 migration）：
 
@@ -153,16 +153,16 @@ server:
 storage:
   provider: "postgres"
   postgres:
-    url_env: "NOVELFORGE_DATABASE_URL"
+    url_env: "INKMUSE_DATABASE_URL"
     max_open_conns: 10
     max_idle_conns: 5
     conn_max_lifetime_seconds: 300
 
 llm:
-  provider_env: "NOVELFORGE_LLM_PROVIDER"
-  model_env: "NOVELFORGE_LLM_MODEL"
-  base_url_env: "NOVELFORGE_LLM_BASE_URL"
-  api_key_env: "NOVELFORGE_LLM_API_KEY"
+  provider_env: "INKMUSE_LLM_PROVIDER"
+  model_env: "INKMUSE_LLM_MODEL"
+  base_url_env: "INKMUSE_LLM_BASE_URL"
+  api_key_env: "INKMUSE_LLM_API_KEY"
   timeout_seconds: 60
   prompts:
     asset_generation: "asset_generation.yaml"

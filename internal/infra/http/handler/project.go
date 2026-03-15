@@ -3,8 +3,8 @@ package handler
 import (
 	"context"
 
-	projectdomain "novelforge/backend/internal/domain/project"
-	projectservice "novelforge/backend/internal/service/project"
+	projectdomain "inkmuse/backend/internal/domain/project"
+	projectservice "inkmuse/backend/internal/service/project"
 
 	"github.com/cloudwego/hertz/pkg/app"
 	"github.com/cloudwego/hertz/pkg/protocol/consts"

@@ -3,9 +3,9 @@ package handler
 import (
 	"context"
 
-	assetdomain "novelforge/backend/internal/domain/asset"
-	generationdomain "novelforge/backend/internal/domain/generation"
-	assetservice "novelforge/backend/internal/service/asset"
+	assetdomain "inkmuse/backend/internal/domain/asset"
+	generationdomain "inkmuse/backend/internal/domain/generation"
+	assetservice "inkmuse/backend/internal/service/asset"
 
 	"github.com/cloudwego/hertz/pkg/app"
 	"github.com/cloudwego/hertz/pkg/protocol/consts"

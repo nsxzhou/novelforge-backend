@@ -6,8 +6,8 @@ import (
 	"errors"
 	"testing"
 
-	"novelforge/backend/internal/infra/storage/postgres"
-	"novelforge/backend/pkg/config"
+	"inkmuse/backend/internal/infra/storage/postgres"
+	"inkmuse/backend/pkg/config"
 
 	"github.com/DATA-DOG/go-sqlmock"
 )
@@ -40,7 +40,7 @@ func TestNewRepositoriesPostgresWiresProvider(t *testing.T) {
 	}
 	defer func() { newPostgresProvider = previousFactory }()
 
-	repos, err := NewRepositories(config.StorageConfig{Provider: config.StorageProviderPostgres, Postgres: config.PostgresConfig{URLEnv: "NOVELFORGE_DATABASE_URL"}})
+	repos, err := NewRepositories(config.StorageConfig{Provider: config.StorageProviderPostgres, Postgres: config.PostgresConfig{URLEnv: "INKMUSE_DATABASE_URL"}})
 	if err != nil {
 		t.Fatalf("NewRepositories() error = %v", err)
 	}
@@ -62,7 +62,7 @@ func TestNewRepositoriesPostgresProviderError(t *testing.T) {
 	}
 	defer func() { newPostgresProvider = previousFactory }()
 
-	_, err := NewRepositories(config.StorageConfig{Provider: config.StorageProviderPostgres, Postgres: config.PostgresConfig{URLEnv: "NOVELFORGE_DATABASE_URL"}})
+	_, err := NewRepositories(config.StorageConfig{Provider: config.StorageProviderPostgres, Postgres: config.PostgresConfig{URLEnv: "INKMUSE_DATABASE_URL"}})
 	if err == nil {
 		t.Fatal("NewRepositories() error = nil, want provider error")
 	}
@@ -93,7 +93,7 @@ func TestRunMigrationsPostgresUsesProviderAndRunner(t *testing.T) {
 		runPostgresMigrations = previousRunner
 	}()
 
-	if err := RunMigrations(context.Background(), config.StorageConfig{Provider: config.StorageProviderPostgres, Postgres: config.PostgresConfig{URLEnv: "NOVELFORGE_DATABASE_URL"}}); err != nil {
+	if err := RunMigrations(context.Background(), config.StorageConfig{Provider: config.StorageProviderPostgres, Postgres: config.PostgresConfig{URLEnv: "INKMUSE_DATABASE_URL"}}); err != nil {
 		t.Fatalf("RunMigrations() error = %v", err)
 	}
 	if !called {

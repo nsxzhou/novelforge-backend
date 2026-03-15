@@ -6,8 +6,8 @@ import (
 	"fmt"
 	"time"
 
-	"novelforge/backend/internal/domain/llmprovider"
-	"novelforge/backend/internal/infra/storage/shared"
+	"inkmuse/backend/internal/domain/llmprovider"
+	"inkmuse/backend/internal/infra/storage/shared"
 )
 
 // LLMProviderRepository persists LLM provider configurations in PostgreSQL.

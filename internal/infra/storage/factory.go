@@ -4,9 +4,9 @@ import (
 	"context"
 	"fmt"
 
-	"novelforge/backend/internal/infra/storage/memory"
-	"novelforge/backend/internal/infra/storage/postgres"
-	"novelforge/backend/pkg/config"
+	"inkmuse/backend/internal/infra/storage/memory"
+	"inkmuse/backend/internal/infra/storage/postgres"
+	"inkmuse/backend/pkg/config"
 )
 
 var newPostgresProvider = postgres.NewProvider

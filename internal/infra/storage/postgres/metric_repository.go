@@ -5,7 +5,7 @@ import (
 	"database/sql"
 	"fmt"
 
-	metricdomain "novelforge/backend/internal/domain/metric"
+	metricdomain "inkmuse/backend/internal/domain/metric"
 )
 
 // MetricEventRepository 在 PostgreSQL 中持久化指标(metric)事件。

@@ -5,7 +5,7 @@ import (
 	"database/sql"
 	"fmt"
 
-	generationdomain "novelforge/backend/internal/domain/generation"
+	generationdomain "inkmuse/backend/internal/domain/generation"
 )
 
 // GenerationRecordRepository 在 PostgreSQL 中持久化生成记录。

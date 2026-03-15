@@ -5,8 +5,8 @@ import (
 	"flag"
 	"log"
 
-	"novelforge/backend/internal/infra/storage"
-	"novelforge/backend/pkg/config"
+	"inkmuse/backend/internal/infra/storage"
+	"inkmuse/backend/pkg/config"
 )
 
 func main() {

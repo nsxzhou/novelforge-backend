@@ -3,8 +3,8 @@ package handler
 import (
 	"context"
 
-	"novelforge/backend/internal/domain/llmprovider"
-	"novelforge/backend/internal/infra/llm"
+	"inkmuse/backend/internal/domain/llmprovider"
+	"inkmuse/backend/internal/infra/llm"
 
 	"github.com/cloudwego/hertz/pkg/app"
 	"github.com/cloudwego/hertz/pkg/protocol/consts"

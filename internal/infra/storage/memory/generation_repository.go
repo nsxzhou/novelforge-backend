@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"sync"
 
-	"novelforge/backend/internal/domain/generation"
+	"inkmuse/backend/internal/domain/generation"
 )
 
 // GenerationRecordRepository 在内存中存储生成记录。

@@ -6,9 +6,9 @@ import (
 	"testing"
 	"time"
 
-	metricdomain "novelforge/backend/internal/domain/metric"
-	"novelforge/backend/internal/infra/storage/memory"
-	appservice "novelforge/backend/internal/service"
+	metricdomain "inkmuse/backend/internal/domain/metric"
+	"inkmuse/backend/internal/infra/storage/memory"
+	appservice "inkmuse/backend/internal/service"
 
 	"github.com/google/uuid"
 )

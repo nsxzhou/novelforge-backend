@@ -4,10 +4,10 @@ import (
 	"context"
 	"strings"
 
-	chapterdomain "novelforge/backend/internal/domain/chapter"
-	generationdomain "novelforge/backend/internal/domain/generation"
-	"novelforge/backend/internal/infra/http/middleware"
-	chapterservice "novelforge/backend/internal/service/chapter"
+	chapterdomain "inkmuse/backend/internal/domain/chapter"
+	generationdomain "inkmuse/backend/internal/domain/generation"
+	"inkmuse/backend/internal/infra/http/middleware"
+	chapterservice "inkmuse/backend/internal/service/chapter"
 
 	"github.com/cloudwego/hertz/pkg/app"
 	"github.com/cloudwego/hertz/pkg/protocol/consts"

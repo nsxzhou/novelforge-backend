@@ -8,10 +8,10 @@ import (
 
 	"github.com/google/uuid"
 
-	projectdomain "novelforge/backend/internal/domain/project"
-	"novelforge/backend/internal/infra/storage"
-	memory "novelforge/backend/internal/infra/storage/memory"
-	appservice "novelforge/backend/internal/service"
+	projectdomain "inkmuse/backend/internal/domain/project"
+	"inkmuse/backend/internal/infra/storage"
+	memory "inkmuse/backend/internal/infra/storage/memory"
+	appservice "inkmuse/backend/internal/service"
 )
 
 func testProjectInput() *projectdomain.Project {

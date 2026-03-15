@@ -1,15 +1,15 @@
 package http
 
 import (
-	promptdomain "novelforge/backend/internal/domain/prompt"
-	"novelforge/backend/internal/domain/llmprovider"
-	"novelforge/backend/internal/infra/http/handler"
-	"novelforge/backend/internal/infra/llm"
-	"novelforge/backend/internal/infra/llm/prompts"
-	assetservice "novelforge/backend/internal/service/asset"
-	chapterservice "novelforge/backend/internal/service/chapter"
-	conversationservice "novelforge/backend/internal/service/conversation"
-	projectservice "novelforge/backend/internal/service/project"
+	promptdomain "inkmuse/backend/internal/domain/prompt"
+	"inkmuse/backend/internal/domain/llmprovider"
+	"inkmuse/backend/internal/infra/http/handler"
+	"inkmuse/backend/internal/infra/llm"
+	"inkmuse/backend/internal/infra/llm/prompts"
+	assetservice "inkmuse/backend/internal/service/asset"
+	chapterservice "inkmuse/backend/internal/service/chapter"
+	conversationservice "inkmuse/backend/internal/service/conversation"
+	projectservice "inkmuse/backend/internal/service/project"
 
 	"github.com/cloudwego/hertz/pkg/app/server"
 )

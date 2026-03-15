@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"time"
 
-	assetdomain "novelforge/backend/internal/domain/asset"
+	assetdomain "inkmuse/backend/internal/domain/asset"
 )
 
 // AssetRepository 在 PostgreSQL 中持久化资产(asset)。

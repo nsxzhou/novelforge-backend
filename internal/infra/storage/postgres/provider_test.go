@@ -6,13 +6,13 @@ import (
 	"regexp"
 	"testing"
 
-	"novelforge/backend/pkg/config"
+	"inkmuse/backend/pkg/config"
 
 	"github.com/DATA-DOG/go-sqlmock"
 )
 
 func TestNewProviderRequiresConfiguredEnv(t *testing.T) {
-	cfg := config.PostgresConfig{URLEnv: "NOVELFORGE_DATABASE_URL"}
+	cfg := config.PostgresConfig{URLEnv: "INKMUSE_DATABASE_URL"}
 	t.Setenv(cfg.URLEnv, "")
 
 	provider, err := NewProvider(context.Background(), cfg)
@@ -45,7 +45,7 @@ func TestNewProviderPingsDatabase(t *testing.T) {
 
 	mock.ExpectPing()
 	cfg := config.PostgresConfig{
-		URLEnv:                 "NOVELFORGE_DATABASE_URL",
+		URLEnv:                 "INKMUSE_DATABASE_URL",
 		MaxOpenConns:           10,
 		MaxIdleConns:           5,
 		ConnMaxLifetimeSeconds: 30,

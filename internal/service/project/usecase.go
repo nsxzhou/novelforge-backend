@@ -8,8 +8,8 @@ import (
 
 	"github.com/google/uuid"
 
-	projectdomain "novelforge/backend/internal/domain/project"
-	appservice "novelforge/backend/internal/service"
+	projectdomain "inkmuse/backend/internal/domain/project"
+	appservice "inkmuse/backend/internal/service"
 )
 
 type useCase struct {

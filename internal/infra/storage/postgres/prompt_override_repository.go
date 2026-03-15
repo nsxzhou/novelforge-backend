@@ -6,8 +6,8 @@ import (
 	"fmt"
 	"time"
 
-	promptdomain "novelforge/backend/internal/domain/prompt"
-	"novelforge/backend/internal/infra/storage/shared"
+	promptdomain "inkmuse/backend/internal/domain/prompt"
+	"inkmuse/backend/internal/infra/storage/shared"
 )
 
 // PromptOverrideRepository 在 PostgreSQL 中持久化项目级 prompt 覆盖。

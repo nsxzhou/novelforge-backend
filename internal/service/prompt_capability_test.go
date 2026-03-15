@@ -3,9 +3,9 @@ package service
 import (
 	"testing"
 
-	conversationdomain "novelforge/backend/internal/domain/conversation"
-	generationdomain "novelforge/backend/internal/domain/generation"
-	"novelforge/backend/pkg/config"
+	conversationdomain "inkmuse/backend/internal/domain/conversation"
+	generationdomain "inkmuse/backend/internal/domain/generation"
+	"inkmuse/backend/pkg/config"
 )
 
 func TestPromptCapabilityForGenerationKind(t *testing.T) {

@@ -6,7 +6,7 @@ import (
 	"sync"
 	"time"
 
-	promptdomain "novelforge/backend/internal/domain/prompt"
+	promptdomain "inkmuse/backend/internal/domain/prompt"
 )
 
 // PromptOverrideRepository 在内存中存储项目级 prompt 覆盖。

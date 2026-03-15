@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"time"
 
-	conversationdomain "novelforge/backend/internal/domain/conversation"
+	conversationdomain "inkmuse/backend/internal/domain/conversation"
 )
 
 // ConversationRepository 在 PostgreSQL 中持久化对话(conversation)。

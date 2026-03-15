@@ -3,14 +3,14 @@ package chapter
 import (
 	"context"
 
-	assetdomain "novelforge/backend/internal/domain/asset"
-	chapterdomain "novelforge/backend/internal/domain/chapter"
-	generationdomain "novelforge/backend/internal/domain/generation"
-	projectdomain "novelforge/backend/internal/domain/project"
-	promptdomain "novelforge/backend/internal/domain/prompt"
-	"novelforge/backend/internal/infra/llm"
-	"novelforge/backend/internal/infra/llm/prompts"
-	metricservice "novelforge/backend/internal/service/metric"
+	assetdomain "inkmuse/backend/internal/domain/asset"
+	chapterdomain "inkmuse/backend/internal/domain/chapter"
+	generationdomain "inkmuse/backend/internal/domain/generation"
+	projectdomain "inkmuse/backend/internal/domain/project"
+	promptdomain "inkmuse/backend/internal/domain/prompt"
+	"inkmuse/backend/internal/infra/llm"
+	"inkmuse/backend/internal/infra/llm/prompts"
+	metricservice "inkmuse/backend/internal/service/metric"
 
 	"github.com/cloudwego/eino/schema"
 )

@@ -11,7 +11,7 @@ import (
 	"github.com/cloudwego/eino/components/model"
 	"github.com/cloudwego/eino/schema"
 
-	"novelforge/backend/pkg/config"
+	"inkmuse/backend/pkg/config"
 )
 
 type stubToolCallingChatModel struct{}
@@ -30,9 +30,9 @@ func (s *stubToolCallingChatModel) WithTools(_ []*schema.ToolInfo) (model.ToolCa
 
 func validLLMConfig(apiKeyEnv string) config.LLMConfig {
 	return config.LLMConfig{
-		ProviderEnv:    "NOVELFORGE_LLM_PROVIDER",
-		ModelEnv:       "NOVELFORGE_LLM_MODEL",
-		BaseURLEnv:     "NOVELFORGE_LLM_BASE_URL",
+		ProviderEnv:    "INKMUSE_LLM_PROVIDER",
+		ModelEnv:       "INKMUSE_LLM_MODEL",
+		BaseURLEnv:     "INKMUSE_LLM_BASE_URL",
 		APIKeyEnv:      apiKeyEnv,
 		TimeoutSeconds: 60,
 		Prompts: config.PromptConfig{
@@ -48,10 +48,10 @@ func validLLMConfig(apiKeyEnv string) config.LLMConfig {
 
 func TestNewClientOpenAICompatibleReturnsChatModel(t *testing.T) {
 	const (
-		providerEnv = "NOVELFORGE_LLM_PROVIDER_FACTORY_SUCCESS_TEST"
-		modelEnv    = "NOVELFORGE_LLM_MODEL_FACTORY_SUCCESS_TEST"
-		baseURLEnv  = "NOVELFORGE_LLM_BASE_URL_FACTORY_SUCCESS_TEST"
-		apiKeyEnv   = "NOVELFORGE_LLM_API_KEY_FACTORY_SUCCESS_TEST"
+		providerEnv = "INKMUSE_LLM_PROVIDER_FACTORY_SUCCESS_TEST"
+		modelEnv    = "INKMUSE_LLM_MODEL_FACTORY_SUCCESS_TEST"
+		baseURLEnv  = "INKMUSE_LLM_BASE_URL_FACTORY_SUCCESS_TEST"
+		apiKeyEnv   = "INKMUSE_LLM_API_KEY_FACTORY_SUCCESS_TEST"
 	)
 
 	t.Setenv(providerEnv, config.LLMProviderOpenAICompatible)
@@ -106,10 +106,10 @@ func TestNewClientOpenAICompatibleReturnsChatModel(t *testing.T) {
 
 func TestNewClientOpenAICompatibleFactoryError(t *testing.T) {
 	const (
-		providerEnv = "NOVELFORGE_LLM_PROVIDER_FACTORY_ERROR_TEST"
-		modelEnv    = "NOVELFORGE_LLM_MODEL_FACTORY_ERROR_TEST"
-		baseURLEnv  = "NOVELFORGE_LLM_BASE_URL_FACTORY_ERROR_TEST"
-		apiKeyEnv   = "NOVELFORGE_LLM_API_KEY_FACTORY_ERROR_TEST"
+		providerEnv = "INKMUSE_LLM_PROVIDER_FACTORY_ERROR_TEST"
+		modelEnv    = "INKMUSE_LLM_MODEL_FACTORY_ERROR_TEST"
+		baseURLEnv  = "INKMUSE_LLM_BASE_URL_FACTORY_ERROR_TEST"
+		apiKeyEnv   = "INKMUSE_LLM_API_KEY_FACTORY_ERROR_TEST"
 	)
 
 	t.Setenv(providerEnv, config.LLMProviderOpenAICompatible)
@@ -135,10 +135,10 @@ func TestNewClientOpenAICompatibleFactoryError(t *testing.T) {
 
 func TestNewClientMissingAPIKeyEnv(t *testing.T) {
 	const (
-		providerEnv = "NOVELFORGE_LLM_PROVIDER_FACTORY_MISSING_API_KEY_TEST"
-		modelEnv    = "NOVELFORGE_LLM_MODEL_FACTORY_MISSING_API_KEY_TEST"
-		baseURLEnv  = "NOVELFORGE_LLM_BASE_URL_FACTORY_MISSING_API_KEY_TEST"
-		apiKeyEnv   = "NOVELFORGE_LLM_API_KEY_FACTORY_MISSING_TEST"
+		providerEnv = "INKMUSE_LLM_PROVIDER_FACTORY_MISSING_API_KEY_TEST"
+		modelEnv    = "INKMUSE_LLM_MODEL_FACTORY_MISSING_API_KEY_TEST"
+		baseURLEnv  = "INKMUSE_LLM_BASE_URL_FACTORY_MISSING_API_KEY_TEST"
+		apiKeyEnv   = "INKMUSE_LLM_API_KEY_FACTORY_MISSING_TEST"
 	)
 
 	t.Setenv(providerEnv, config.LLMProviderOpenAICompatible)
@@ -160,10 +160,10 @@ func TestNewClientMissingAPIKeyEnv(t *testing.T) {
 
 func TestNewClientEmptyAPIKeyEnv(t *testing.T) {
 	const (
-		providerEnv = "NOVELFORGE_LLM_PROVIDER_FACTORY_EMPTY_API_KEY_TEST"
-		modelEnv    = "NOVELFORGE_LLM_MODEL_FACTORY_EMPTY_API_KEY_TEST"
-		baseURLEnv  = "NOVELFORGE_LLM_BASE_URL_FACTORY_EMPTY_API_KEY_TEST"
-		apiKeyEnv   = "NOVELFORGE_LLM_API_KEY_FACTORY_EMPTY_TEST"
+		providerEnv = "INKMUSE_LLM_PROVIDER_FACTORY_EMPTY_API_KEY_TEST"
+		modelEnv    = "INKMUSE_LLM_MODEL_FACTORY_EMPTY_API_KEY_TEST"
+		baseURLEnv  = "INKMUSE_LLM_BASE_URL_FACTORY_EMPTY_API_KEY_TEST"
+		apiKeyEnv   = "INKMUSE_LLM_API_KEY_FACTORY_EMPTY_TEST"
 	)
 
 	t.Setenv(providerEnv, config.LLMProviderOpenAICompatible)
@@ -186,10 +186,10 @@ func TestNewClientEmptyAPIKeyEnv(t *testing.T) {
 
 func TestNewClientMissingProviderEnv(t *testing.T) {
 	const (
-		providerEnv = "NOVELFORGE_LLM_PROVIDER_FACTORY_MISSING_PROVIDER_TEST"
-		modelEnv    = "NOVELFORGE_LLM_MODEL_FACTORY_MISSING_PROVIDER_TEST"
-		baseURLEnv  = "NOVELFORGE_LLM_BASE_URL_FACTORY_MISSING_PROVIDER_TEST"
-		apiKeyEnv   = "NOVELFORGE_LLM_API_KEY_FACTORY_MISSING_PROVIDER_TEST"
+		providerEnv = "INKMUSE_LLM_PROVIDER_FACTORY_MISSING_PROVIDER_TEST"
+		modelEnv    = "INKMUSE_LLM_MODEL_FACTORY_MISSING_PROVIDER_TEST"
+		baseURLEnv  = "INKMUSE_LLM_BASE_URL_FACTORY_MISSING_PROVIDER_TEST"
+		apiKeyEnv   = "INKMUSE_LLM_API_KEY_FACTORY_MISSING_PROVIDER_TEST"
 	)
 
 	t.Setenv(modelEnv, "gpt-4o-mini")

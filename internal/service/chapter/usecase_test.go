@@ -7,16 +7,16 @@ import (
 	"testing"
 	"time"
 
-	assetdomain "novelforge/backend/internal/domain/asset"
-	chapterdomain "novelforge/backend/internal/domain/chapter"
-	generationdomain "novelforge/backend/internal/domain/generation"
-	metricdomain "novelforge/backend/internal/domain/metric"
-	projectdomain "novelforge/backend/internal/domain/project"
-	"novelforge/backend/internal/infra/llm/prompts"
-	"novelforge/backend/internal/infra/storage/memory"
-	appservice "novelforge/backend/internal/service"
-	metricservice "novelforge/backend/internal/service/metric"
-	"novelforge/backend/pkg/config"
+	assetdomain "inkmuse/backend/internal/domain/asset"
+	chapterdomain "inkmuse/backend/internal/domain/chapter"
+	generationdomain "inkmuse/backend/internal/domain/generation"
+	metricdomain "inkmuse/backend/internal/domain/metric"
+	projectdomain "inkmuse/backend/internal/domain/project"
+	"inkmuse/backend/internal/infra/llm/prompts"
+	"inkmuse/backend/internal/infra/storage/memory"
+	appservice "inkmuse/backend/internal/service"
+	metricservice "inkmuse/backend/internal/service/metric"
+	"inkmuse/backend/pkg/config"
 
 	"github.com/cloudwego/eino/components/model"
 	"github.com/cloudwego/eino/schema"
@@ -72,7 +72,7 @@ func createProjectEntity(t *testing.T, repo projectdomain.ProjectRepository, id 
 	now := time.Date(2026, 3, 9, 10, 0, 0, 0, time.UTC)
 	entity := &projectdomain.Project{
 		ID:        id,
-		Title:     "NovelForge",
+		Title:     "InkMuse",
 		Summary:   "A long-form fantasy adventure.",
 		Status:    projectdomain.StatusDraft,
 		CreatedAt: now,

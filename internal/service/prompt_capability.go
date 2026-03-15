@@ -1,9 +1,9 @@
 package service
 
 import (
-	conversationdomain "novelforge/backend/internal/domain/conversation"
-	generationdomain "novelforge/backend/internal/domain/generation"
-	"novelforge/backend/pkg/config"
+	conversationdomain "inkmuse/backend/internal/domain/conversation"
+	generationdomain "inkmuse/backend/internal/domain/generation"
+	"inkmuse/backend/pkg/config"
 )
 
 // PromptCapabilityForGenerationKind 将生成任务种类映射为 Prompt 能力。

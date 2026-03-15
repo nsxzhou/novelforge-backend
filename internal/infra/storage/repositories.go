@@ -3,14 +3,14 @@ package storage
 import (
 	"context"
 
-	"novelforge/backend/internal/domain/asset"
-	"novelforge/backend/internal/domain/chapter"
-	"novelforge/backend/internal/domain/conversation"
-	"novelforge/backend/internal/domain/generation"
-	"novelforge/backend/internal/domain/llmprovider"
-	"novelforge/backend/internal/domain/metric"
-	"novelforge/backend/internal/domain/project"
-	"novelforge/backend/internal/domain/prompt"
+	"inkmuse/backend/internal/domain/asset"
+	"inkmuse/backend/internal/domain/chapter"
+	"inkmuse/backend/internal/domain/conversation"
+	"inkmuse/backend/internal/domain/generation"
+	"inkmuse/backend/internal/domain/llmprovider"
+	"inkmuse/backend/internal/domain/metric"
+	"inkmuse/backend/internal/domain/project"
+	"inkmuse/backend/internal/domain/prompt"
 )
 
 // ReadinessChecker reports whether the storage backend is ready.

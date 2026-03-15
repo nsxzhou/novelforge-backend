@@ -4,7 +4,7 @@ import (
 	"flag"
 	"log"
 
-	"novelforge/backend/internal/app"
+	"inkmuse/backend/internal/app"
 )
 
 func main() {

@@ -6,8 +6,8 @@ import (
 	"testing"
 	"testing/fstest"
 
-	"novelforge/backend/internal/domain/generation"
-	"novelforge/backend/pkg/config"
+	"inkmuse/backend/internal/domain/generation"
+	"inkmuse/backend/pkg/config"
 )
 
 func validPromptConfig() config.PromptConfig {

@@ -6,7 +6,7 @@ import (
 	"sync"
 	"time"
 
-	"novelforge/backend/internal/domain/project"
+	"inkmuse/backend/internal/domain/project"
 )
 
 // ProjectRepository 在内存中存储项目(project)。

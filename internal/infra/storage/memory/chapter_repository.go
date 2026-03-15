@@ -6,7 +6,7 @@ import (
 	"sync"
 	"time"
 
-	"novelforge/backend/internal/domain/chapter"
+	"inkmuse/backend/internal/domain/chapter"
 )
 
 // ChapterRepository 在内存中存储章节(chapter)。

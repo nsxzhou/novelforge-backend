@@ -3,9 +3,9 @@ package http
 import (
 	"time"
 
-	apiroutes "novelforge/backend/api/http"
-	"novelforge/backend/internal/infra/http/middleware"
-	"novelforge/backend/pkg/config"
+	apiroutes "inkmuse/backend/api/http"
+	"inkmuse/backend/internal/infra/http/middleware"
+	"inkmuse/backend/pkg/config"
 
 	"github.com/cloudwego/hertz/pkg/app/server"
 )

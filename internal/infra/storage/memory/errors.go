@@ -1,6 +1,6 @@
 package memory
 
-import "novelforge/backend/internal/infra/storage/shared"
+import "inkmuse/backend/internal/infra/storage/shared"
 
 var (
 	ErrNotFound      = shared.ErrNotFound

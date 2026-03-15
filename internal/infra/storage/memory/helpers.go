@@ -1,12 +1,12 @@
 package memory
 
 import (
-	"novelforge/backend/internal/domain/asset"
-	"novelforge/backend/internal/domain/chapter"
-	"novelforge/backend/internal/domain/conversation"
-	"novelforge/backend/internal/domain/generation"
-	"novelforge/backend/internal/domain/metric"
-	"novelforge/backend/internal/domain/project"
+	"inkmuse/backend/internal/domain/asset"
+	"inkmuse/backend/internal/domain/chapter"
+	"inkmuse/backend/internal/domain/conversation"
+	"inkmuse/backend/internal/domain/generation"
+	"inkmuse/backend/internal/domain/metric"
+	"inkmuse/backend/internal/domain/project"
 )
 
 func sliceBounds(limit, offset, length int) (int, int) {

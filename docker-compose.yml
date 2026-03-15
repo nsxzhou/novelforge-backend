@@ -1,18 +1,18 @@
 services:
   postgres:
     image: postgres:16-alpine
-    container_name: novelforge-postgres
+    container_name: inkmuse-postgres
     restart: unless-stopped
     environment:
-      POSTGRES_DB: novelforge
-      POSTGRES_USER: novelforge
-      POSTGRES_PASSWORD: novelforge
+      POSTGRES_DB: inkmuse
+      POSTGRES_USER: inkmuse
+      POSTGRES_PASSWORD: inkmuse
     ports:
       - "5432:5432"
     volumes:
       - postgres-data:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U novelforge -d novelforge"]
+      test: ["CMD-SHELL", "pg_isready -U inkmuse -d inkmuse"]
       interval: 5s
       timeout: 5s
       retries: 10

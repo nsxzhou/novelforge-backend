@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"time"
 
-	chapterdomain "novelforge/backend/internal/domain/chapter"
+	chapterdomain "inkmuse/backend/internal/domain/chapter"
 )
 
 // ChapterRepository 在 PostgreSQL 中持久化章节(chapter)。

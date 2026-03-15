@@ -8,11 +8,11 @@ import (
 	"strings"
 	"testing"
 
-	"novelforge/backend/internal/domain/llmprovider"
-	"novelforge/backend/internal/infra/llm"
-	"novelforge/backend/internal/infra/llm/prompts"
-	"novelforge/backend/internal/infra/storage"
-	"novelforge/backend/pkg/config"
+	"inkmuse/backend/internal/domain/llmprovider"
+	"inkmuse/backend/internal/infra/llm"
+	"inkmuse/backend/internal/infra/llm/prompts"
+	"inkmuse/backend/internal/infra/storage"
+	"inkmuse/backend/pkg/config"
 )
 
 func writeTestConfig(t *testing.T, llmBlock string) string {
@@ -109,10 +109,10 @@ func TestLoadBootstrapNoEnvVarsStartsWithEmptyRegistry(t *testing.T) {
 
 func TestLoadBootstrapSeedsFromEnvWhenDBEmpty(t *testing.T) {
 	const (
-		providerEnv = "NOVELFORGE_LLM_PROVIDER_SEED_TEST"
-		modelEnv    = "NOVELFORGE_LLM_MODEL_SEED_TEST"
-		baseURLEnv  = "NOVELFORGE_LLM_BASE_URL_SEED_TEST"
-		apiKeyEnv   = "NOVELFORGE_LLM_API_KEY_SEED_TEST"
+		providerEnv = "INKMUSE_LLM_PROVIDER_SEED_TEST"
+		modelEnv    = "INKMUSE_LLM_MODEL_SEED_TEST"
+		baseURLEnv  = "INKMUSE_LLM_BASE_URL_SEED_TEST"
+		apiKeyEnv   = "INKMUSE_LLM_API_KEY_SEED_TEST"
 	)
 
 	setLLMRuntimeEnv(t, providerEnv, modelEnv, baseURLEnv)
@@ -191,10 +191,10 @@ func TestLoadBootstrapPromptStoreErrorClosesRepositories(t *testing.T) {
 
 func TestLoadBootstrapSuccessWiresPromptStore(t *testing.T) {
 	const (
-		providerEnv = "NOVELFORGE_LLM_PROVIDER_BOOTSTRAP_SUCCESS_TEST"
-		modelEnv    = "NOVELFORGE_LLM_MODEL_BOOTSTRAP_SUCCESS_TEST"
-		baseURLEnv  = "NOVELFORGE_LLM_BASE_URL_BOOTSTRAP_SUCCESS_TEST"
-		apiKeyEnv   = "NOVELFORGE_LLM_API_KEY_BOOTSTRAP_SUCCESS_TEST"
+		providerEnv = "INKMUSE_LLM_PROVIDER_BOOTSTRAP_SUCCESS_TEST"
+		modelEnv    = "INKMUSE_LLM_MODEL_BOOTSTRAP_SUCCESS_TEST"
+		baseURLEnv  = "INKMUSE_LLM_BASE_URL_BOOTSTRAP_SUCCESS_TEST"
+		apiKeyEnv   = "INKMUSE_LLM_API_KEY_BOOTSTRAP_SUCCESS_TEST"
 	)
 
 	setLLMRuntimeEnv(t, providerEnv, modelEnv, baseURLEnv)
@@ -254,10 +254,10 @@ func TestLoadBootstrapRunMigrationsError(t *testing.T) {
 
 func TestLoadBootstrapRunsMigrationsBeforeRepositories(t *testing.T) {
 	const (
-		providerEnv = "NOVELFORGE_LLM_PROVIDER_BOOTSTRAP_MIGRATION_ORDER_TEST"
-		modelEnv    = "NOVELFORGE_LLM_MODEL_BOOTSTRAP_MIGRATION_ORDER_TEST"
-		baseURLEnv  = "NOVELFORGE_LLM_BASE_URL_BOOTSTRAP_MIGRATION_ORDER_TEST"
-		apiKeyEnv   = "NOVELFORGE_LLM_API_KEY_BOOTSTRAP_MIGRATION_ORDER_TEST"
+		providerEnv = "INKMUSE_LLM_PROVIDER_BOOTSTRAP_MIGRATION_ORDER_TEST"
+		modelEnv    = "INKMUSE_LLM_MODEL_BOOTSTRAP_MIGRATION_ORDER_TEST"
+		baseURLEnv  = "INKMUSE_LLM_BASE_URL_BOOTSTRAP_MIGRATION_ORDER_TEST"
+		apiKeyEnv   = "INKMUSE_LLM_API_KEY_BOOTSTRAP_MIGRATION_ORDER_TEST"
 	)
 
 	setLLMRuntimeEnv(t, providerEnv, modelEnv, baseURLEnv)

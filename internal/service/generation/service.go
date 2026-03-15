@@ -3,7 +3,7 @@ package generation
 import (
 	"context"
 
-	generationdomain "novelforge/backend/internal/domain/generation"
+	generationdomain "inkmuse/backend/internal/domain/generation"
 )
 
 // Dependencies 声明生成(generation)用例所需的领域依赖项。

@@ -4,7 +4,7 @@ import (
 	"errors"
 	"fmt"
 
-	"novelforge/backend/internal/infra/storage"
+	"inkmuse/backend/internal/infra/storage"
 )
 
 var (

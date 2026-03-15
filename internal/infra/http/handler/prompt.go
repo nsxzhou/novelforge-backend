@@ -5,9 +5,9 @@ import (
 	"fmt"
 	"strings"
 
-	promptdomain "novelforge/backend/internal/domain/prompt"
-	"novelforge/backend/internal/infra/llm/prompts"
-	"novelforge/backend/pkg/config"
+	promptdomain "inkmuse/backend/internal/domain/prompt"
+	"inkmuse/backend/internal/infra/llm/prompts"
+	"inkmuse/backend/pkg/config"
 
 	"github.com/cloudwego/hertz/pkg/app"
 	"github.com/cloudwego/hertz/pkg/protocol/consts"

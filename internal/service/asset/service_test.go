@@ -11,16 +11,16 @@ import (
 	"github.com/cloudwego/eino/schema"
 	"github.com/google/uuid"
 
-	assetdomain "novelforge/backend/internal/domain/asset"
-	generationdomain "novelforge/backend/internal/domain/generation"
-	metricdomain "novelforge/backend/internal/domain/metric"
-	projectdomain "novelforge/backend/internal/domain/project"
-	"novelforge/backend/internal/infra/llm/prompts"
-	"novelforge/backend/internal/infra/storage"
-	memory "novelforge/backend/internal/infra/storage/memory"
-	appservice "novelforge/backend/internal/service"
-	metricservice "novelforge/backend/internal/service/metric"
-	"novelforge/backend/pkg/config"
+	assetdomain "inkmuse/backend/internal/domain/asset"
+	generationdomain "inkmuse/backend/internal/domain/generation"
+	metricdomain "inkmuse/backend/internal/domain/metric"
+	projectdomain "inkmuse/backend/internal/domain/project"
+	"inkmuse/backend/internal/infra/llm/prompts"
+	"inkmuse/backend/internal/infra/storage"
+	memory "inkmuse/backend/internal/infra/storage/memory"
+	appservice "inkmuse/backend/internal/service"
+	metricservice "inkmuse/backend/internal/service/metric"
+	"inkmuse/backend/pkg/config"
 )
 
 func seedProjectForAsset(t *testing.T, repo projectdomain.ProjectRepository) *projectdomain.Project {

@@ -11,7 +11,7 @@ server:
 storage:
   provider: "postgres"
   postgres:
-    url_env: "NOVELFORGE_DATABASE_URL"
+    url_env: "INKMUSE_DATABASE_URL"
     max_open_conns: 10
     max_idle_conns: 5
     conn_max_lifetime_seconds: 300
@@ -20,10 +20,10 @@ llm:
   # 以下环境变量仅在数据库中无 provider 配置时作为初始种子使用。
   # 首次启动后，通过 API /api/v1/llm/providers 管理 provider。
   # 如不配置，系统将以无 LLM 状态启动，需通过 API 手动添加。
-  provider_env: "NOVELFORGE_LLM_PROVIDER"    # 可选
-  model_env: "NOVELFORGE_LLM_MODEL"          # 可选
-  base_url_env: "NOVELFORGE_LLM_BASE_URL"    # 可选
-  api_key_env: "NOVELFORGE_LLM_API_KEY"      # 可选
+  provider_env: "INKMUSE_LLM_PROVIDER"    # 可选
+  model_env: "INKMUSE_LLM_MODEL"          # 可选
+  base_url_env: "INKMUSE_LLM_BASE_URL"    # 可选
+  api_key_env: "INKMUSE_LLM_API_KEY"      # 可选
   timeout_seconds: 60
   prompts:
     asset_generation: "asset_generation.yaml"

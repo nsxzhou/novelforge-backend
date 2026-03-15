@@ -6,7 +6,7 @@ import (
 	"sync"
 	"time"
 
-	"novelforge/backend/internal/domain/asset"
+	"inkmuse/backend/internal/domain/asset"
 )
 
 // AssetRepository 在内存中存储资产(asset)。

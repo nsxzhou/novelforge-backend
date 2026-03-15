@@ -8,7 +8,7 @@ import (
 	"strings"
 	texttemplate "text/template"
 
-	"novelforge/backend/pkg/config"
+	"inkmuse/backend/pkg/config"
 
 	"gopkg.in/yaml.v3"
 )

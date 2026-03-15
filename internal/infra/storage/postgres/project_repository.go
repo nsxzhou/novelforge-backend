@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"time"
 
-	projectdomain "novelforge/backend/internal/domain/project"
+	projectdomain "inkmuse/backend/internal/domain/project"
 )
 
 // ProjectRepository 在 PostgreSQL 中持久化项目(project)。

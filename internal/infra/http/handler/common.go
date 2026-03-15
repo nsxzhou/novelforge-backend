@@ -6,7 +6,7 @@ import (
 	"strconv"
 	"strings"
 
-	appservice "novelforge/backend/internal/service"
+	appservice "inkmuse/backend/internal/service"
 
 	"github.com/cloudwego/hertz/pkg/app"
 	"github.com/cloudwego/hertz/pkg/protocol/consts"

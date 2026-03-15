@@ -3,7 +3,7 @@ package project
 import (
 	"context"
 
-	projectdomain "novelforge/backend/internal/domain/project"
+	projectdomain "inkmuse/backend/internal/domain/project"
 )
 
 // Dependencies 声明项目(project)用例所需的领域依赖项。

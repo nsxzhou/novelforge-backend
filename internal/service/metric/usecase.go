@@ -6,8 +6,8 @@ import (
 	"strings"
 	"time"
 
-	metricdomain "novelforge/backend/internal/domain/metric"
-	appservice "novelforge/backend/internal/service"
+	metricdomain "inkmuse/backend/internal/domain/metric"
+	appservice "inkmuse/backend/internal/service"
 
 	"github.com/google/uuid"
 )

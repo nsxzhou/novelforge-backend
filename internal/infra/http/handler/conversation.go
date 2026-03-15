@@ -3,10 +3,10 @@ package handler
 import (
 	"context"
 
-	assetdomain "novelforge/backend/internal/domain/asset"
-	conversationdomain "novelforge/backend/internal/domain/conversation"
-	projectdomain "novelforge/backend/internal/domain/project"
-	conversationservice "novelforge/backend/internal/service/conversation"
+	assetdomain "inkmuse/backend/internal/domain/asset"
+	conversationdomain "inkmuse/backend/internal/domain/conversation"
+	projectdomain "inkmuse/backend/internal/domain/project"
+	conversationservice "inkmuse/backend/internal/service/conversation"
 
 	"github.com/cloudwego/hertz/pkg/app"
 	"github.com/cloudwego/hertz/pkg/protocol/consts"

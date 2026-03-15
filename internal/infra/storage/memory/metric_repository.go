@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"sync"
 
-	"novelforge/backend/internal/domain/metric"
+	"inkmuse/backend/internal/domain/metric"
 )
 
 // MetricEventRepository 在内存中存储仅追加(append-only)的指标(metric)事件。
