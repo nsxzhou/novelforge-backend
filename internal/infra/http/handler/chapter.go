@@ -192,6 +192,84 @@ func (h *ChapterHandler) Confirm(c context.Context, ctx *app.RequestContext) {
 	ctx.JSON(consts.StatusOK, newChapterResponse(chapter))
 }
 
+func (h *ChapterHandler) CreateStream(c context.Context, ctx *app.RequestContext) {
+	var request chapterGenerateRequest
+	if err := ctx.BindJSON(&request); err != nil {
+		writeError(ctx, consts.StatusBadRequest, err.Error())
+		return
+	}
+
+	result, err := h.useCase.GenerateStream(c, chapterservice.GenerateParams{
+		ProjectID:   ctx.Param("projectID"),
+		Title:       request.Title,
+		Ordinal:     request.Ordinal,
+		Instruction: request.Instruction,
+	})
+	if err != nil {
+		writeServiceError(ctx, err)
+		return
+	}
+
+	writeSSEStream(ctx, result.Stream, func(content string) (any, error) {
+		generateResult, err := result.OnComplete(content)
+		if err != nil {
+			return nil, err
+		}
+		return newChapterGenerationResponse(generateResult.Chapter, generateResult.GenerationRecord), nil
+	})
+}
+
+func (h *ChapterHandler) ContinueStream(c context.Context, ctx *app.RequestContext) {
+	var request chapterContinueRequest
+	if err := ctx.BindJSON(&request); err != nil {
+		writeError(ctx, consts.StatusBadRequest, err.Error())
+		return
+	}
+
+	result, err := h.useCase.ContinueStream(c, chapterservice.ContinueParams{
+		ChapterID:   ctx.Param("chapterID"),
+		Instruction: request.Instruction,
+	})
+	if err != nil {
+		writeServiceError(ctx, err)
+		return
+	}
+
+	writeSSEStream(ctx, result.Stream, func(content string) (any, error) {
+		continueResult, err := result.OnComplete(content)
+		if err != nil {
+			return nil, err
+		}
+		return newChapterGenerationResponse(continueResult.Chapter, continueResult.GenerationRecord), nil
+	})
+}
+
+func (h *ChapterHandler) RewriteStream(c context.Context, ctx *app.RequestContext) {
+	var request chapterRewriteRequest
+	if err := ctx.BindJSON(&request); err != nil {
+		writeError(ctx, consts.StatusBadRequest, err.Error())
+		return
+	}
+
+	result, err := h.useCase.RewriteStream(c, chapterservice.RewriteParams{
+		ChapterID:   ctx.Param("chapterID"),
+		TargetText:  request.TargetText,
+		Instruction: request.Instruction,
+	})
+	if err != nil {
+		writeServiceError(ctx, err)
+		return
+	}
+
+	writeSSEStream(ctx, result.Stream, func(content string) (any, error) {
+		rewriteResult, err := result.OnComplete(content)
+		if err != nil {
+			return nil, err
+		}
+		return newChapterGenerationResponse(rewriteResult.Chapter, rewriteResult.GenerationRecord), nil
+	})
+}
+
 func currentUserID(ctx *app.RequestContext) (string, bool) {
 	value, exists := ctx.Get(middleware.UserIDContextKey)
 	if !exists {

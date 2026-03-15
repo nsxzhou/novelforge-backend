@@ -8,8 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/cloudwego/eino/components/model"
-
+	"novelforge/backend/internal/domain/llmprovider"
 	"novelforge/backend/internal/infra/llm"
 	"novelforge/backend/internal/infra/llm/prompts"
 	"novelforge/backend/internal/infra/storage"
@@ -50,6 +49,18 @@ func validLLMConfigBlock(providerEnv, modelEnv, baseURLEnv, apiKeyEnv string) st
 		"    asset_refinement: \"asset_refinement.yaml\"\n"
 }
 
+func minimalLLMConfigBlock() string {
+	return "llm:\n" +
+		"  timeout_seconds: 60\n" +
+		"  prompts:\n" +
+		"    asset_generation: \"asset_generation.yaml\"\n" +
+		"    chapter_generation: \"chapter_generation.yaml\"\n" +
+		"    chapter_continuation: \"chapter_continuation.yaml\"\n" +
+		"    chapter_rewrite: \"chapter_rewrite.yaml\"\n" +
+		"    project_refinement: \"project_refinement.yaml\"\n" +
+		"    asset_refinement: \"asset_refinement.yaml\"\n"
+}
+
 func setLLMRuntimeEnv(t *testing.T, providerEnv, modelEnv, baseURLEnv string) {
 	t.Helper()
 	t.Setenv(providerEnv, config.LLMProviderOpenAICompatible)
@@ -57,72 +68,80 @@ func setLLMRuntimeEnv(t *testing.T, providerEnv, modelEnv, baseURLEnv string) {
 	t.Setenv(baseURLEnv, "https://api.openai.com/v1")
 }
 
-type stubLLMClient struct{}
-
-func (s *stubLLMClient) Provider() string { return config.LLMProviderOpenAICompatible }
-
-func (s *stubLLMClient) Model() string { return "gpt-4o-mini" }
-
-func (s *stubLLMClient) ChatModel() model.ToolCallingChatModel { return nil }
-
-func TestLoadBootstrapMissingAPIKeyEnv(t *testing.T) {
-	const (
-		providerEnv = "NOVELFORGE_LLM_PROVIDER_BOOTSTRAP_MISSING_API_KEY_TEST"
-		modelEnv    = "NOVELFORGE_LLM_MODEL_BOOTSTRAP_MISSING_API_KEY_TEST"
-		baseURLEnv  = "NOVELFORGE_LLM_BASE_URL_BOOTSTRAP_MISSING_API_KEY_TEST"
-		apiKeyEnv   = "NOVELFORGE_LLM_API_KEY_BOOTSTRAP_MISSING_TEST"
-	)
-
-	setLLMRuntimeEnv(t, providerEnv, modelEnv, baseURLEnv)
-
-	configPath := writeTestConfig(t, validLLMConfigBlock(providerEnv, modelEnv, baseURLEnv, apiKeyEnv))
-	bootstrap, err := LoadBootstrap(configPath)
-	if err == nil {
-		if bootstrap != nil {
-			_ = bootstrap.Close()
-		}
-		t.Fatal("LoadBootstrap() error = nil, want missing env error")
+func stubInitLLMRegistry(t *testing.T) func() {
+	t.Helper()
+	prev := [3]any{seedFromEnv, newRegistryFromDB, newRegistry}
+	seedFromEnv = func(_ config.LLMConfig) ([]llm.ProviderConfig, error) {
+		return nil, nil
 	}
-	if !strings.Contains(err.Error(), "required environment variable \""+apiKeyEnv+"\" is not set or empty") {
-		t.Fatalf("LoadBootstrap() error = %v, want missing env error", err)
+	newRegistryFromDB = func(_ []*llmprovider.LLMProvider) (*llm.Registry, error) {
+		return llm.NewRegistry(nil)
+	}
+	newRegistry = func(configs []llm.ProviderConfig) (*llm.Registry, error) {
+		return llm.NewRegistry(configs)
+	}
+	return func() {
+		seedFromEnv = prev[0].(func(config.LLMConfig) ([]llm.ProviderConfig, error))
+		newRegistryFromDB = prev[1].(func([]*llmprovider.LLMProvider) (*llm.Registry, error))
+		newRegistry = prev[2].(func([]llm.ProviderConfig) (*llm.Registry, error))
 	}
 }
 
-func TestLoadBootstrapEmptyAPIKeyEnv(t *testing.T) {
-	const (
-		providerEnv = "NOVELFORGE_LLM_PROVIDER_BOOTSTRAP_EMPTY_API_KEY_TEST"
-		modelEnv    = "NOVELFORGE_LLM_MODEL_BOOTSTRAP_EMPTY_API_KEY_TEST"
-		baseURLEnv  = "NOVELFORGE_LLM_BASE_URL_BOOTSTRAP_EMPTY_API_KEY_TEST"
-		apiKeyEnv   = "NOVELFORGE_LLM_API_KEY_BOOTSTRAP_EMPTY_TEST"
-	)
+func TestLoadBootstrapNoEnvVarsStartsWithEmptyRegistry(t *testing.T) {
+	previousRunMigrations := runMigrations
+	runMigrations = func(context.Context, config.StorageConfig) error { return nil }
+	defer func() { runMigrations = previousRunMigrations }()
 
-	setLLMRuntimeEnv(t, providerEnv, modelEnv, baseURLEnv)
-	t.Setenv(apiKeyEnv, "   ")
-
-	configPath := writeTestConfig(t, validLLMConfigBlock(providerEnv, modelEnv, baseURLEnv, apiKeyEnv))
+	configPath := writeTestConfig(t, minimalLLMConfigBlock())
 	bootstrap, err := LoadBootstrap(configPath)
-	if err == nil {
-		if bootstrap != nil {
-			_ = bootstrap.Close()
-		}
-		t.Fatal("LoadBootstrap() error = nil, want empty env error")
+	if err != nil {
+		t.Fatalf("LoadBootstrap() error = %v", err)
 	}
-	if !strings.Contains(err.Error(), "required environment variable \""+apiKeyEnv+"\" is not set or empty") {
-		t.Fatalf("LoadBootstrap() error = %v, want empty env error", err)
+	defer bootstrap.Close()
+
+	if bootstrap.LLMClient == nil {
+		t.Fatal("LLMClient = nil, want non-nil (empty registry)")
+	}
+	if bootstrap.LLMRegistry == nil {
+		t.Fatal("LLMRegistry = nil, want non-nil (empty registry)")
 	}
 }
 
-func TestLoadBootstrapPromptStoreErrorClosesRepositories(t *testing.T) {
+func TestLoadBootstrapSeedsFromEnvWhenDBEmpty(t *testing.T) {
 	const (
-		providerEnv = "NOVELFORGE_LLM_PROVIDER_BOOTSTRAP_PROMPT_TEST"
-		modelEnv    = "NOVELFORGE_LLM_MODEL_BOOTSTRAP_PROMPT_TEST"
-		baseURLEnv  = "NOVELFORGE_LLM_BASE_URL_BOOTSTRAP_PROMPT_TEST"
-		apiKeyEnv   = "NOVELFORGE_LLM_API_KEY_BOOTSTRAP_PROMPT_TEST"
+		providerEnv = "NOVELFORGE_LLM_PROVIDER_SEED_TEST"
+		modelEnv    = "NOVELFORGE_LLM_MODEL_SEED_TEST"
+		baseURLEnv  = "NOVELFORGE_LLM_BASE_URL_SEED_TEST"
+		apiKeyEnv   = "NOVELFORGE_LLM_API_KEY_SEED_TEST"
 	)
 
 	setLLMRuntimeEnv(t, providerEnv, modelEnv, baseURLEnv)
 	t.Setenv(apiKeyEnv, "test-key")
 
+	previousRunMigrations := runMigrations
+	runMigrations = func(context.Context, config.StorageConfig) error { return nil }
+	defer func() { runMigrations = previousRunMigrations }()
+
+	configPath := writeTestConfig(t, validLLMConfigBlock(providerEnv, modelEnv, baseURLEnv, apiKeyEnv))
+	bootstrap, err := LoadBootstrap(configPath)
+	if err != nil {
+		t.Fatalf("LoadBootstrap() error = %v", err)
+	}
+	defer bootstrap.Close()
+
+	if bootstrap.LLMClient == nil {
+		t.Fatal("LLMClient = nil, want non-nil")
+	}
+	providers := bootstrap.LLMRegistry.ListProviders()
+	if len(providers) != 1 {
+		t.Fatalf("len(providers) = %d, want 1", len(providers))
+	}
+	if providers[0].ID != "default" {
+		t.Fatalf("provider id = %q, want %q", providers[0].ID, "default")
+	}
+}
+
+func TestLoadBootstrapPromptStoreErrorClosesRepositories(t *testing.T) {
 	previousRunMigrations := runMigrations
 	runMigrations = func(context.Context, config.StorageConfig) error { return nil }
 	defer func() { runMigrations = previousRunMigrations }()
@@ -134,11 +153,8 @@ func TestLoadBootstrapPromptStoreErrorClosesRepositories(t *testing.T) {
 	}
 	defer func() { newRepositories = previousNewRepositories }()
 
-	previousNewLLMClient := newLLMClient
-	newLLMClient = func(_ config.LLMConfig) (llm.Client, error) {
-		return &stubLLMClient{}, nil
-	}
-	defer func() { newLLMClient = previousNewLLMClient }()
+	restore := stubInitLLMRegistry(t)
+	defer restore()
 
 	previousLoadPromptStore := loadPromptStore
 	loadPromptStore = func(_ config.PromptConfig) (*prompts.Store, error) {
@@ -157,7 +173,7 @@ func TestLoadBootstrapPromptStoreErrorClosesRepositories(t *testing.T) {
 	}
 	defer func() { closeRepositories = previousCloseRepositories }()
 
-	configPath := writeTestConfig(t, validLLMConfigBlock(providerEnv, modelEnv, baseURLEnv, apiKeyEnv))
+	configPath := writeTestConfig(t, minimalLLMConfigBlock())
 	bootstrap, err := LoadBootstrap(configPath)
 	if err == nil {
 		if bootstrap != nil {
@@ -210,16 +226,6 @@ func TestLoadBootstrapSuccessWiresPromptStore(t *testing.T) {
 }
 
 func TestLoadBootstrapRunMigrationsError(t *testing.T) {
-	const (
-		providerEnv = "NOVELFORGE_LLM_PROVIDER_BOOTSTRAP_MIGRATION_ERROR_TEST"
-		modelEnv    = "NOVELFORGE_LLM_MODEL_BOOTSTRAP_MIGRATION_ERROR_TEST"
-		baseURLEnv  = "NOVELFORGE_LLM_BASE_URL_BOOTSTRAP_MIGRATION_ERROR_TEST"
-		apiKeyEnv   = "NOVELFORGE_LLM_API_KEY_BOOTSTRAP_MIGRATION_ERROR_TEST"
-	)
-
-	setLLMRuntimeEnv(t, providerEnv, modelEnv, baseURLEnv)
-	t.Setenv(apiKeyEnv, "test-key")
-
 	previousRunMigrations := runMigrations
 	runMigrations = func(context.Context, config.StorageConfig) error {
 		return errors.New("migration failed")
@@ -233,7 +239,7 @@ func TestLoadBootstrapRunMigrationsError(t *testing.T) {
 	}
 	defer func() { newRepositories = previousNewRepositories }()
 
-	configPath := writeTestConfig(t, validLLMConfigBlock(providerEnv, modelEnv, baseURLEnv, apiKeyEnv))
+	configPath := writeTestConfig(t, minimalLLMConfigBlock())
 	bootstrap, err := LoadBootstrap(configPath)
 	if err == nil {
 		if bootstrap != nil {
@@ -272,12 +278,6 @@ func TestLoadBootstrapRunsMigrationsBeforeRepositories(t *testing.T) {
 		return &storage.Repositories{}, nil
 	}
 	defer func() { newRepositories = previousNewRepositories }()
-
-	previousNewLLMClient := newLLMClient
-	newLLMClient = func(config.LLMConfig) (llm.Client, error) {
-		return &stubLLMClient{}, nil
-	}
-	defer func() { newLLMClient = previousNewLLMClient }()
 
 	previousLoadPromptStore := loadPromptStore
 	loadPromptStore = prompts.LoadStore

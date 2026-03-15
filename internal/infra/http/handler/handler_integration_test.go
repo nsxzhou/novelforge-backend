@@ -1349,6 +1349,10 @@ func (s stubAssetUseCase) Delete(ctx context.Context, id string) error {
 	return errors.New("unexpected Delete call")
 }
 
+func (s stubAssetUseCase) GenerateStream(_ context.Context, _ assetservice.GenerateParams) (*assetservice.GenerateStreamResult, error) {
+	return nil, nil
+}
+
 type stubChapterUseCase struct {
 	create        func(context.Context, *chapterdomain.Chapter) error
 	getByID       func(context.Context, string) (*chapterdomain.Chapter, error)
@@ -1445,6 +1449,18 @@ func (s stubChapterUseCase) Confirm(ctx context.Context, params chapterservice.C
 	return nil, errors.New("unexpected Confirm call")
 }
 
+func (s stubChapterUseCase) GenerateStream(_ context.Context, _ chapterservice.GenerateParams) (*chapterservice.GenerateStreamResult, error) {
+	return nil, nil
+}
+
+func (s stubChapterUseCase) ContinueStream(_ context.Context, _ chapterservice.ContinueParams) (*chapterservice.ContinueStreamResult, error) {
+	return nil, nil
+}
+
+func (s stubChapterUseCase) RewriteStream(_ context.Context, _ chapterservice.RewriteParams) (*chapterservice.RewriteStreamResult, error) {
+	return nil, nil
+}
+
 type stubConversationUseCase struct {
 	start   func(context.Context, conversationservice.StartParams) (*conversationdomain.Conversation, error)
 	reply   func(context.Context, conversationservice.ReplyParams) (*conversationdomain.Conversation, error)
@@ -1486,4 +1502,12 @@ func (s stubConversationUseCase) List(ctx context.Context, params conversationse
 		return s.list(ctx, params)
 	}
 	return nil, errors.New("unexpected List call")
+}
+
+func (s stubConversationUseCase) StartStream(_ context.Context, _ conversationservice.StartParams) (*conversationservice.StartStreamResult, error) {
+	return nil, nil
+}
+
+func (s stubConversationUseCase) ReplyStream(_ context.Context, _ conversationservice.ReplyParams) (*conversationservice.ReplyStreamResult, error) {
+	return nil, nil
 }

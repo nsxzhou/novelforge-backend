@@ -1,7 +1,11 @@
 package http
 
 import (
+	promptdomain "novelforge/backend/internal/domain/prompt"
+	"novelforge/backend/internal/domain/llmprovider"
 	"novelforge/backend/internal/infra/http/handler"
+	"novelforge/backend/internal/infra/llm"
+	"novelforge/backend/internal/infra/llm/prompts"
 	assetservice "novelforge/backend/internal/service/asset"
 	chapterservice "novelforge/backend/internal/service/chapter"
 	conversationservice "novelforge/backend/internal/service/conversation"
@@ -12,11 +16,15 @@ import (
 
 // Dependencies 包含路由级别的服务。
 type Dependencies struct {
-	Projects      projectservice.UseCase
-	Assets        assetservice.UseCase
-	Chapters      chapterservice.UseCase
-	Conversations conversationservice.UseCase
-	Readiness     handler.ReadinessChecker
+	Projects        projectservice.UseCase
+	Assets          assetservice.UseCase
+	Chapters        chapterservice.UseCase
+	Conversations   conversationservice.UseCase
+	Readiness       handler.ReadinessChecker
+	LLMRegistry     *llm.Registry
+	LLMProviders    llmprovider.Repository
+	PromptOverrides promptdomain.OverrideRepository
+	PromptStore     *prompts.Store
 }
 
 // RegisterRoutes 注册所有 HTTP 路由。
@@ -52,4 +60,30 @@ func RegisterRoutes(h *server.Hertz, deps Dependencies) {
 	v1.GET("/conversations/:conversationID", conversationHandler.GetByID)
 	v1.POST("/conversations/:conversationID/messages", conversationHandler.Reply)
 	v1.POST("/conversations/:conversationID/confirm", conversationHandler.Confirm)
+
+	// Streaming routes (SSE).
+	v1.POST("/projects/:projectID/chapters/stream", chapterHandler.CreateStream)
+	v1.POST("/chapters/:chapterID/continue/stream", chapterHandler.ContinueStream)
+	v1.POST("/chapters/:chapterID/rewrite/stream", chapterHandler.RewriteStream)
+	v1.POST("/projects/:projectID/assets/generate/stream", assetHandler.GenerateStream)
+	v1.POST("/projects/:projectID/conversations/stream", conversationHandler.StartStream)
+	v1.POST("/conversations/:conversationID/messages/stream", conversationHandler.ReplyStream)
+
+	// Project-level prompt override routes.
+	if deps.PromptOverrides != nil && deps.PromptStore != nil {
+		promptHandler := handler.NewPromptHandler(deps.PromptOverrides, deps.PromptStore)
+		v1.GET("/projects/:projectID/prompts", promptHandler.List)
+		v1.GET("/projects/:projectID/prompts/:capability", promptHandler.Get)
+		v1.PUT("/projects/:projectID/prompts/:capability", promptHandler.Upsert)
+		v1.DELETE("/projects/:projectID/prompts/:capability", promptHandler.Delete)
+	}
+
+	// LLM provider management routes (user self-service).
+	if deps.LLMRegistry != nil && deps.LLMProviders != nil {
+		llmProviderHandler := handler.NewLLMProviderHandler(deps.LLMRegistry, deps.LLMProviders)
+		v1.GET("/llm/providers", llmProviderHandler.ListProviders)
+		v1.POST("/llm/providers", llmProviderHandler.AddProvider)
+		v1.PUT("/llm/providers/:providerID", llmProviderHandler.UpdateProvider)
+		v1.DELETE("/llm/providers/:providerID", llmProviderHandler.DeleteProvider)
+	}
 }

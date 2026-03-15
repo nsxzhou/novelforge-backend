@@ -106,6 +106,58 @@ func (h *ConversationHandler) Reply(c context.Context, ctx *app.RequestContext) 
 	ctx.JSON(consts.StatusOK, newConversationResponse(conversation))
 }
 
+func (h *ConversationHandler) StartStream(c context.Context, ctx *app.RequestContext) {
+	var request conversationStartRequest
+	if err := ctx.BindJSON(&request); err != nil {
+		writeError(ctx, consts.StatusBadRequest, err.Error())
+		return
+	}
+
+	result, err := h.useCase.StartStream(c, conversationservice.StartParams{
+		ProjectID:  ctx.Param("projectID"),
+		TargetType: request.TargetType,
+		TargetID:   request.TargetID,
+		Message:    request.Message,
+	})
+	if err != nil {
+		writeServiceError(ctx, err)
+		return
+	}
+
+	writeSSEStream(ctx, result.Stream, func(content string) (any, error) {
+		conversation, err := result.OnComplete(content)
+		if err != nil {
+			return nil, err
+		}
+		return newConversationResponse(conversation), nil
+	})
+}
+
+func (h *ConversationHandler) ReplyStream(c context.Context, ctx *app.RequestContext) {
+	var request conversationReplyRequest
+	if err := ctx.BindJSON(&request); err != nil {
+		writeError(ctx, consts.StatusBadRequest, err.Error())
+		return
+	}
+
+	result, err := h.useCase.ReplyStream(c, conversationservice.ReplyParams{
+		ConversationID: ctx.Param("conversationID"),
+		Message:        request.Message,
+	})
+	if err != nil {
+		writeServiceError(ctx, err)
+		return
+	}
+
+	writeSSEStream(ctx, result.Stream, func(content string) (any, error) {
+		conversation, err := result.OnComplete(content)
+		if err != nil {
+			return nil, err
+		}
+		return newConversationResponse(conversation), nil
+	})
+}
+
 func (h *ConversationHandler) Confirm(c context.Context, ctx *app.RequestContext) {
 	result, err := h.useCase.Confirm(c, ctx.Param("conversationID"))
 	if err != nil {

@@ -134,6 +134,32 @@ func (h *AssetHandler) Generate(c context.Context, ctx *app.RequestContext) {
 	ctx.JSON(consts.StatusCreated, newAssetGenerationResponse(result.Asset, result.GenerationRecord))
 }
 
+func (h *AssetHandler) GenerateStream(c context.Context, ctx *app.RequestContext) {
+	var request assetGenerateRequest
+	if err := ctx.BindJSON(&request); err != nil {
+		writeError(ctx, consts.StatusBadRequest, err.Error())
+		return
+	}
+
+	result, err := h.useCase.GenerateStream(c, assetservice.GenerateParams{
+		ProjectID:   ctx.Param("projectID"),
+		Type:        request.Type,
+		Instruction: request.Instruction,
+	})
+	if err != nil {
+		writeServiceError(ctx, err)
+		return
+	}
+
+	writeSSEStream(ctx, result.Stream, func(content string) (any, error) {
+		generateResult, err := result.OnComplete(content)
+		if err != nil {
+			return nil, err
+		}
+		return newAssetGenerationResponse(generateResult.Asset, generateResult.GenerationRecord), nil
+	})
+}
+
 func (h *AssetHandler) GetByID(c context.Context, ctx *app.RequestContext) {
 	entity, err := h.useCase.GetByID(c, ctx.Param("assetID"))
 	if err != nil {

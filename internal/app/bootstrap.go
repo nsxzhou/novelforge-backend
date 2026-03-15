@@ -3,6 +3,7 @@ package app
 import (
 	"context"
 	"fmt"
+	"log"
 
 	httpinfra "novelforge/backend/internal/infra/http"
 	"novelforge/backend/internal/infra/llm"
@@ -21,7 +22,9 @@ import (
 var (
 	newRepositories   = storage.NewRepositories
 	runMigrations     = storage.RunMigrations
-	newLLMClient      = llm.NewClient
+	seedFromEnv       = llm.SeedRegistryFromEnv
+	newRegistryFromDB = llm.NewRegistryFromDB
+	newRegistry       = llm.NewRegistry
 	loadPromptStore   = prompts.LoadStore
 	closeRepositories = func(repositories *storage.Repositories) error {
 		if repositories == nil {
@@ -36,6 +39,7 @@ type Bootstrap struct {
 	Config       *config.AppConfig
 	HTTP         *server.Hertz
 	LLMClient    llm.Client
+	LLMRegistry  *llm.Registry
 	PromptStore  *prompts.Store
 	Repositories *storage.Repositories
 }
@@ -55,11 +59,13 @@ func LoadBootstrap(configPath string) (*Bootstrap, error) {
 		return nil, fmt.Errorf("init repositories: %w", err)
 	}
 
-	llmClient, err := newLLMClient(cfg.LLM)
+	llmRegistry, err := initLLMRegistry(cfg.LLM, repositories)
 	if err != nil {
 		_ = closeRepositories(repositories)
-		return nil, fmt.Errorf("init llm client: %w", err)
+		return nil, fmt.Errorf("init llm registry: %w", err)
 	}
+	// Registry implements llm.Client, so it serves as both the Client and the Registry.
+	var llmClient llm.Client = llmRegistry
 
 	promptStore, err := loadPromptStore(cfg.LLM.Prompts)
 	if err != nil {
@@ -77,6 +83,7 @@ func LoadBootstrap(configPath string) (*Bootstrap, error) {
 		GenerationRecords: repositories.GenerationRecords,
 		LLMClient:         llmClient,
 		PromptStore:       promptStore,
+		PromptOverrides:   repositories.PromptOverrides,
 		Metrics:           metricUseCase,
 	})
 	chapterUseCase := chapterservice.NewUseCase(chapterservice.Dependencies{
@@ -86,33 +93,86 @@ func LoadBootstrap(configPath string) (*Bootstrap, error) {
 		GenerationRecords: repositories.GenerationRecords,
 		LLMClient:         llmClient,
 		PromptStore:       promptStore,
+		PromptOverrides:   repositories.PromptOverrides,
 		Metrics:           metricUseCase,
 	})
 	conversationUseCase := conversationservice.NewUseCase(conversationservice.Dependencies{
-		Conversations: repositories.Conversations,
-		Projects:      repositories.Projects,
-		Assets:        repositories.Assets,
-		LLMClient:     llmClient,
-		PromptStore:   promptStore,
-		Metrics:       metricUseCase,
-		TxRunner:      repositories.TxRunner,
+		Conversations:   repositories.Conversations,
+		Projects:        repositories.Projects,
+		Assets:          repositories.Assets,
+		LLMClient:       llmClient,
+		PromptStore:     promptStore,
+		PromptOverrides: repositories.PromptOverrides,
+		Metrics:         metricUseCase,
+		TxRunner:        repositories.TxRunner,
 	})
 
 	httpServer := httpinfra.NewServer(cfg.Server, httpinfra.Dependencies{
-		Projects:      projectUseCase,
-		Assets:        assetUseCase,
-		Chapters:      chapterUseCase,
-		Conversations: conversationUseCase,
-		Readiness:     repositories,
+		Projects:        projectUseCase,
+		Assets:          assetUseCase,
+		Chapters:        chapterUseCase,
+		Conversations:   conversationUseCase,
+		Readiness:       repositories,
+		LLMRegistry:     llmRegistry,
+		LLMProviders:    repositories.LLMProviders,
+		PromptOverrides: repositories.PromptOverrides,
+		PromptStore:     promptStore,
 	})
 
 	return &Bootstrap{
 		Config:       cfg,
 		HTTP:         httpServer,
 		LLMClient:    llmClient,
+		LLMRegistry:  llmRegistry,
 		PromptStore:  promptStore,
 		Repositories: repositories,
 	}, nil
+}
+
+// initLLMRegistry creates the LLM Registry using a DB-first strategy:
+// 1. Load providers from DB.
+// 2. If DB has records, create Registry from DB (ignore env vars).
+// 3. If DB is empty, try seeding from env vars and persist to DB.
+// 4. If env vars are also empty, create an empty Registry.
+func initLLMRegistry(cfg config.LLMConfig, repos *storage.Repositories) (*llm.Registry, error) {
+	ctx := context.Background()
+
+	// Step 1: Try loading from DB.
+	if repos.LLMProviders != nil {
+		dbProviders, err := repos.LLMProviders.List(ctx)
+		if err != nil {
+			return nil, fmt.Errorf("load providers from db: %w", err)
+		}
+
+		if len(dbProviders) > 0 {
+			// Step 2: DB has records — use them.
+			log.Printf("[bootstrap] loaded %d LLM provider(s) from database", len(dbProviders))
+			return newRegistryFromDB(dbProviders)
+		}
+	}
+
+	// Step 3: DB is empty — try seeding from env vars.
+	seedConfigs, err := seedFromEnv(cfg)
+	if err != nil {
+		return nil, fmt.Errorf("seed from env: %w", err)
+	}
+
+	if len(seedConfigs) > 0 {
+		// Persist seed to DB for future restarts.
+		if repos.LLMProviders != nil {
+			for _, sc := range seedConfigs {
+				if persistErr := repos.LLMProviders.Upsert(ctx, llm.ProviderConfigToDomain(sc)); persistErr != nil {
+					log.Printf("[bootstrap] warning: failed to persist seed provider %q to db: %v", sc.ID, persistErr)
+				}
+			}
+		}
+		log.Printf("[bootstrap] seeded %d LLM provider(s) from environment variables", len(seedConfigs))
+		return newRegistry(seedConfigs)
+	}
+
+	// Step 4: No providers at all — create empty registry.
+	log.Printf("[bootstrap] no LLM providers configured; system starts without LLM capability")
+	return newRegistry(nil)
 }
 
 // Close 释放引导(bootstrap)资源。
