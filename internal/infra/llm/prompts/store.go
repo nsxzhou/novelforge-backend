@@ -73,6 +73,12 @@ func LoadStore(cfg config.PromptConfig) (*Store, error) {
 	return &Store{templates: templates}, nil
 }
 
+// TemplateSnapshot 包含一个 capability 的原始模板文本。
+type TemplateSnapshot struct {
+	System string
+	User   string
+}
+
 // Get returns the template configured for a generation kind.
 func (s *Store) Get(capability config.PromptCapability) (*Template, bool) {
 	if s == nil {
@@ -80,6 +86,47 @@ func (s *Store) Get(capability config.PromptCapability) (*Template, bool) {
 	}
 	value, ok := s.templates[capability]
 	return value, ok
+}
+
+// List 返回所有默认模板的原始文本快照。
+func (s *Store) List() map[config.PromptCapability]TemplateSnapshot {
+	if s == nil {
+		return nil
+	}
+	result := make(map[config.PromptCapability]TemplateSnapshot, len(s.templates))
+	for capability, tmpl := range s.templates {
+		result[capability] = TemplateSnapshot{
+			System: tmpl.System,
+			User:   tmpl.User,
+		}
+	}
+	return result
+}
+
+// ParseTemplate 验证并解析模板文本，返回可用于渲染的 Template。
+func ParseTemplate(capability, system, user string) (*Template, error) {
+	if strings.TrimSpace(system) == "" {
+		return nil, fmt.Errorf("system template must not be empty")
+	}
+	if strings.TrimSpace(user) == "" {
+		return nil, fmt.Errorf("user template must not be empty")
+	}
+
+	systemTemplate, err := texttemplate.New(capability + ":system").Parse(system)
+	if err != nil {
+		return nil, fmt.Errorf("parse system template: %w", err)
+	}
+	userTemplate, err := texttemplate.New(capability + ":user").Parse(user)
+	if err != nil {
+		return nil, fmt.Errorf("parse user template: %w", err)
+	}
+
+	return &Template{
+		System:         system,
+		User:           user,
+		systemTemplate: systemTemplate,
+		userTemplate:   userTemplate,
+	}, nil
 }
 
 func loadTemplate(capability config.PromptCapability, filename string) (*Template, error) {

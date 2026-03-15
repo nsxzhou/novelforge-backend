@@ -244,7 +244,7 @@ func TestLLMConfigValidate(t *testing.T) {
 		wantErr string
 	}{
 		{
-			name: "valid openai compatible",
+			name: "valid with all env vars",
 			cfg: LLMConfig{
 				ProviderEnv:    "NOVELFORGE_LLM_PROVIDER",
 				ModelEnv:       "NOVELFORGE_LLM_MODEL",
@@ -254,12 +254,9 @@ func TestLLMConfigValidate(t *testing.T) {
 				Prompts:        validPromptConfig(),
 			},
 		},
-		{name: "empty provider env", cfg: LLMConfig{}, wantErr: "provider_env must not be empty"},
-		{name: "missing model env", cfg: LLMConfig{ProviderEnv: "NOVELFORGE_LLM_PROVIDER", BaseURLEnv: "NOVELFORGE_LLM_BASE_URL", APIKeyEnv: "NOVELFORGE_LLM_API_KEY", TimeoutSeconds: 60, Prompts: validPromptConfig()}, wantErr: "model_env must not be empty"},
-		{name: "missing base url env", cfg: LLMConfig{ProviderEnv: "NOVELFORGE_LLM_PROVIDER", ModelEnv: "NOVELFORGE_LLM_MODEL", APIKeyEnv: "NOVELFORGE_LLM_API_KEY", TimeoutSeconds: 60, Prompts: validPromptConfig()}, wantErr: "base_url_env must not be empty"},
-		{name: "missing api key env", cfg: LLMConfig{ProviderEnv: "NOVELFORGE_LLM_PROVIDER", ModelEnv: "NOVELFORGE_LLM_MODEL", BaseURLEnv: "NOVELFORGE_LLM_BASE_URL", TimeoutSeconds: 60, Prompts: validPromptConfig()}, wantErr: "api_key_env must not be empty"},
-		{name: "invalid timeout", cfg: LLMConfig{ProviderEnv: "NOVELFORGE_LLM_PROVIDER", ModelEnv: "NOVELFORGE_LLM_MODEL", BaseURLEnv: "NOVELFORGE_LLM_BASE_URL", APIKeyEnv: "NOVELFORGE_LLM_API_KEY", TimeoutSeconds: 0, Prompts: validPromptConfig()}, wantErr: "timeout_seconds must be greater than 0"},
-		{name: "missing prompts", cfg: LLMConfig{ProviderEnv: "NOVELFORGE_LLM_PROVIDER", ModelEnv: "NOVELFORGE_LLM_MODEL", BaseURLEnv: "NOVELFORGE_LLM_BASE_URL", APIKeyEnv: "NOVELFORGE_LLM_API_KEY", TimeoutSeconds: 60}, wantErr: "invalid prompts config: asset_generation must not be empty"},
+		{name: "valid without env vars (optional)", cfg: LLMConfig{TimeoutSeconds: 60, Prompts: validPromptConfig()}},
+		{name: "invalid timeout", cfg: LLMConfig{TimeoutSeconds: 0, Prompts: validPromptConfig()}, wantErr: "timeout_seconds must be greater than 0"},
+		{name: "missing prompts", cfg: LLMConfig{TimeoutSeconds: 60}, wantErr: "invalid prompts config: asset_generation must not be empty"},
 	}
 
 	for _, tt := range tests {

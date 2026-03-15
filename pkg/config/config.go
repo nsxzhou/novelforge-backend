@@ -271,19 +271,9 @@ func (c PromptConfig) FilenameFor(capability PromptCapability) string {
 }
 
 // Validate validates LLM configuration.
+// The env fields (provider_env, model_env, base_url_env, api_key_env) are optional.
+// When omitted, the system starts without an LLM seed and providers must be added via API.
 func (c LLMConfig) Validate() error {
-	if strings.TrimSpace(c.ProviderEnv) == "" {
-		return fmt.Errorf("provider_env must not be empty")
-	}
-	if strings.TrimSpace(c.ModelEnv) == "" {
-		return fmt.Errorf("model_env must not be empty")
-	}
-	if strings.TrimSpace(c.BaseURLEnv) == "" {
-		return fmt.Errorf("base_url_env must not be empty")
-	}
-	if strings.TrimSpace(c.APIKeyEnv) == "" {
-		return fmt.Errorf("api_key_env must not be empty")
-	}
 	if c.TimeoutSeconds <= 0 {
 		return fmt.Errorf("timeout_seconds must be greater than 0")
 	}
